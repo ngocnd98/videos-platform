@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.pulsemedia.hub.common.ApiException;
 import com.pulsemedia.hub.common.AuditLog;
 import com.pulsemedia.hub.security.CurrentUser;
+import com.pulsemedia.hub.settings.SettingsService;
 import com.pulsemedia.hub.storage.ObjectStorage;
 import com.pulsemedia.hub.storage.ObjectStorage.UploadedPart;
 import com.pulsemedia.hub.storage.StorageKeys;
@@ -32,24 +33,27 @@ import com.pulsemedia.hub.video.VideoRepository.VideoRow;
 @Service
 public class CreatorVideoService {
 
-    static final long MAX_VIDEO_BYTES = 2L * 1024 * 1024 * 1024;
     // R2 requires every part except the last to be at least 5 MiB and all of the same size.
     static final long PART_SIZE = 10L * 1024 * 1024;
     static final long MAX_THUMBNAIL_BYTES = 2L * 1024 * 1024;
 
     private static final Set<String> EDITABLE = Set.of("DRAFT", "REJECTED");
+    private static final int MAX_TAGS = 10;
     private static final Set<String> STATUSES = Set.of("DRAFT", "IN_REVIEW", "APPROVED", "REJECTED", "PUBLISHED");
 
     private final VideoRepository videos;
     private final ObjectStorage storage;
     private final StorageKeys keys;
     private final AuditLog audit;
+    private final SettingsService settings;
 
-    public CreatorVideoService(VideoRepository videos, ObjectStorage storage, StorageKeys keys, AuditLog audit) {
+    public CreatorVideoService(VideoRepository videos, ObjectStorage storage, StorageKeys keys, AuditLog audit,
+                               SettingsService settings) {
         this.videos = videos;
         this.storage = storage;
         this.keys = keys;
         this.audit = audit;
+        this.settings = settings;
     }
 
     public List<VideoDto> list(CurrentUser user, String status) {
@@ -65,7 +69,8 @@ public class CreatorVideoService {
 
     @Transactional
     public VideoDto create(CurrentUser user, VideoMetadata metadata) {
-        requireCategory(metadata.categoryId());
+        requireCategory(metadata.categoryId(), null);
+        requireTagLimit(metadata.tags());
         String code = videos.createDraft(user.creatorId(), metadata);
         return toDto(owned(user, code));
     }
@@ -73,7 +78,8 @@ public class CreatorVideoService {
     @Transactional
     public VideoDto update(CurrentUser user, String code, VideoMetadata metadata) {
         VideoRow video = editable(user, code);
-        requireCategory(metadata.categoryId());
+        requireCategory(metadata.categoryId(), video.categoryId());
+        requireTagLimit(metadata.tags());
         videos.updateMetadata(video.id(), metadata);
         return toDto(owned(user, code));
     }
@@ -81,13 +87,25 @@ public class CreatorVideoService {
     @Transactional
     public void deleteDraft(CurrentUser user, String code) {
         VideoRow video = owned(user, code);
-        if (!"DRAFT".equals(video.status())) {
-            throw ApiException.conflict("Only drafts can be deleted.");
+        if (!EDITABLE.contains(video.status())) {
+            throw ApiException.conflict("Only drafts and rejected videos can be deleted.");
         }
         videos.file(video.id(), "ORIGINAL")
                 .filter(f -> f.uploadId() != null)
                 .ifPresent(f -> storage.abortMultipartUpload(f.storageKey(), f.uploadId()));
         videos.delete(video.id());
+        audit.record("VIDEO", video.code(), video.title(), "Deleted", video.code() + " deleted by creator.", user.id());
+    }
+
+    /** A creator can pull a submission back to draft until a reviewer has decided. */
+    @Transactional
+    public VideoDto withdraw(CurrentUser user, String code) {
+        VideoRow video = owned(user, code);
+        if (!videos.withdraw(video.id())) {
+            throw ApiException.conflict("Only videos waiting for review can be withdrawn.");
+        }
+        audit.record("VIDEO", video.code(), video.title(), "Withdrawn", "Creator withdrew the video before a decision.", user.id());
+        return toDto(owned(user, code));
     }
 
     /** Starts (or restarts from 0%) the upload of the original file. Any previous original is replaced. */
@@ -97,8 +115,8 @@ public class CreatorVideoService {
         if (!req.contentType().startsWith("video/")) {
             throw ApiException.badRequest("Only video files can be uploaded.");
         }
-        if (req.size() > MAX_VIDEO_BYTES) {
-            throw ApiException.badRequest("This video is larger than the 2 GB upload limit.");
+        if (req.size() > settings.uploadLimitBytes()) {
+            throw ApiException.badRequest("This video is larger than the " + settings.get().uploadLimitGb() + " GB upload limit.");
         }
         videos.file(video.id(), "ORIGINAL")
                 .filter(f -> f.uploadId() != null)
@@ -214,9 +232,17 @@ public class CreatorVideoService {
                 .orElseThrow(() -> new ApiException(HttpStatus.GONE, "There is no upload in progress for this video. Please start again."));
     }
 
-    private void requireCategory(long categoryId) {
-        if (!videos.categoryExists(categoryId)) {
-            throw ApiException.badRequest("Unknown category.");
+    /** Hidden categories can't be picked for new content, but a video may keep the one it already has. */
+    private void requireCategory(long categoryId, Long currentCategoryId) {
+        var category = videos.category(categoryId).orElseThrow(() -> ApiException.badRequest("Unknown category."));
+        if (!category.visible() && !Long.valueOf(categoryId).equals(currentCategoryId)) {
+            throw ApiException.badRequest("This category is not available for new uploads.");
+        }
+    }
+
+    private static void requireTagLimit(String tags) {
+        if (VideoRepository.tagCount(tags) > MAX_TAGS) {
+            throw ApiException.badRequest("A video can have up to 10 tags.");
         }
     }
 
@@ -236,7 +262,7 @@ public class CreatorVideoService {
                 ? videos.file(v.id(), "THUMBNAIL").map(f -> storage.presignGet(f.storageKey(), null)).orElse(null)
                 : null;
         String rejection = "REJECTED".equals(v.status()) ? videos.latestRejectionReason(v.id()).orElse(null) : null;
-        return new VideoDto(v.code(), v.title(), v.description(), v.categoryId(), v.category(), v.tags(), v.status(),
+        return new VideoDto(v.code(), v.title(), v.description(), v.categoryId(), v.category(), v.tags(), v.language(), v.status(),
                 v.durationSec(), v.views(), v.thumbColor(), thumbnailUrl, v.createdAt(), v.submittedAt(), rejection, original);
     }
 }

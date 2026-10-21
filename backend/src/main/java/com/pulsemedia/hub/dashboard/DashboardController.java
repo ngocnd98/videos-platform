@@ -17,6 +17,7 @@ import com.pulsemedia.hub.dashboard.DashboardDtos.AdminDashboard;
 import com.pulsemedia.hub.dashboard.DashboardDtos.CreatorDashboard;
 import com.pulsemedia.hub.dashboard.DashboardDtos.MonthlyGross;
 import com.pulsemedia.hub.security.CurrentUser;
+import com.pulsemedia.hub.settings.SettingsService;
 
 @RestController
 @RequestMapping("/api")
@@ -28,8 +29,11 @@ public class DashboardController {
     // SQLite's 'now' is UTC, so month boundaries are computed in UTC as well.
     private final Clock clock = Clock.systemUTC();
 
-    public DashboardController(DashboardRepository repo) {
+    private final SettingsService settings;
+
+    public DashboardController(DashboardRepository repo, SettingsService settings) {
         this.repo = repo;
+        this.settings = settings;
     }
 
     @GetMapping("/admin/dashboard")
@@ -47,7 +51,12 @@ public class DashboardController {
                 repo.creatorsJoinedThisMonth(),
                 repo.reviewQueue(3),
                 lastMonths(now),
-                repo.recentPublications(5));
+                repo.recentPublications(5),
+                repo.approvedUnpublished(),
+                repo.pendingPayouts(),
+                repo.pendingPayoutsCents(),
+                repo.storageUsedBytes(),
+                settings.get().storageQuotaGb());
     }
 
     @GetMapping("/creator/dashboard")

@@ -6,7 +6,7 @@ import type { LoginResponse, User } from '../api/types'
 export type Mode = 'admin' | 'creator'
 
 // The header's Admin/Creator switch signs in as these seeded demo accounts.
-const DEMO_ACCOUNTS: Record<Mode, string> = {
+export const DEMO_ACCOUNTS: Record<Mode, string> = {
   admin: 'admin@pulsemedia.demo',
   creator: 'alex@pulsemedia.demo',
 }
@@ -17,6 +17,8 @@ interface AuthState {
   mode: Mode
   loading: boolean
   switchMode: (mode: Mode) => Promise<void>
+  /** Signs in with any account (e.g. another seeded creator); throws ApiError with the server's message. */
+  signIn: (email: string, password: string) => Promise<void>
 }
 
 const AuthContext = createContext<AuthState | null>(null)
@@ -26,14 +28,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
 
-  const login = useCallback(async (mode: Mode) => {
-    const res = await api<LoginResponse>('/auth/login', {
-      method: 'POST',
-      json: { email: DEMO_ACCOUNTS[mode], password: DEMO_PASSWORD },
-    })
+  const loginAs = useCallback(async (email: string, password: string) => {
+    const res = await api<LoginResponse>('/auth/login', { method: 'POST', json: { email, password } })
     setToken(res.token)
     setUser(res.user)
   }, [])
+
+  const login = useCallback((mode: Mode) => loginAs(DEMO_ACCOUNTS[mode], DEMO_PASSWORD), [loginAs])
 
   useEffect(() => {
     // The database is recreated on every server restart, so a stored token may point at
@@ -63,9 +64,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [login, queryClient],
   )
 
+  const signIn = useCallback(
+    async (email: string, password: string) => {
+      await loginAs(email, password)
+      queryClient.clear()
+    },
+    [loginAs, queryClient],
+  )
+
   const mode: Mode = user?.role === 'CREATOR' ? 'creator' : 'admin'
 
-  return <AuthContext.Provider value={{ user, mode, loading, switchMode }}>{children}</AuthContext.Provider>
+  return <AuthContext.Provider value={{ user, mode, loading, switchMode, signIn }}>{children}</AuthContext.Provider>
 }
 
 export function useAuth() {

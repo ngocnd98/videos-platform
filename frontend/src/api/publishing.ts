@@ -1,11 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './client'
-import type { Platform, PlatformSummary, PublishingVideo } from './types'
+import type { Platform, PlatformSummary, Publication, PublicationStatus, PublishingVideo } from './types'
 
 export const publishingKeys = {
   videos: (status: 'APPROVED' | 'PUBLISHED') => ['publishing', 'videos', status] as const,
   summary: ['publishing', 'summary'] as const,
+  publications: ['publishing', 'publications'] as const,
+  mine: ['publishing', 'mine'] as const,
 }
+
+/** Agency channels the team posts to; free text on the server. */
+export const CHANNELS = ['PulseMedia Main', 'PulseMedia Clips', 'PulseMedia Food', 'PulseMedia Reels']
 
 export const usePublishingVideos = (status: 'APPROVED' | 'PUBLISHED') =>
   useQuery({ queryKey: publishingKeys.videos(status), queryFn: () => api<PublishingVideo[]>(`/admin/publishing/videos?status=${status}`) })
@@ -19,8 +24,8 @@ export const fetchDownloadUrl = (code: string) =>
 export function usePublish() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ code, publications, note }: { code: string; publications: { platform: Platform; url: string }[]; note?: string }) =>
-      api<PublishingVideo>(`/admin/videos/${encodeURIComponent(code)}/publications`, { method: 'POST', json: { publications, note } }),
+    mutationFn: ({ code, ...body }: { code: string; publications: { platform: Platform; url: string }[]; channel?: string; note?: string }) =>
+      api<PublishingVideo>(`/admin/videos/${encodeURIComponent(code)}/publications`, { method: 'POST', json: body }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['publishing'] })
       queryClient.invalidateQueries({ queryKey: ['dashboard'] })
@@ -46,4 +51,23 @@ export function validPlatformUrl(platform: Platform, value: string) {
   } catch {
     return false
   }
+}
+
+export const usePublications = () =>
+  useQuery({ queryKey: publishingKeys.publications, queryFn: () => api<Publication[]>('/admin/publications') })
+
+export const useMyPublications = () =>
+  useQuery({ queryKey: publishingKeys.mine, queryFn: () => api<Publication[]>('/creator/publications') })
+
+export function useUpdatePublication() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, ...body }: { id: number; channel: string; url: string; status: PublicationStatus; note?: string }) =>
+      api<Publication>(`/admin/publications/${id}`, { method: 'PATCH', json: body }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['publishing'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+      queryClient.invalidateQueries({ queryKey: ['audit'] })
+    },
+  })
 }

@@ -1,20 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './client'
-import type { CreatorBalance, Payout, Platform, RevenueEntry, RevenuePage, Statement } from './types'
+import type { Platform, RevenueEntry, RevenuePage, Statement } from './types'
 
 export const revenueKeys = {
   page: (period: string) => ['revenue', 'page', period] as const,
-  balances: ['revenue', 'balances'] as const,
-  payouts: ['revenue', 'payouts'] as const,
   statement: (scope: string, period: string) => ['revenue', 'statement', scope, period] as const,
 }
 
 export const useRevenue = (period: string) =>
   useQuery({ queryKey: revenueKeys.page(period), queryFn: () => api<RevenuePage>(`/admin/revenue${period ? `?period=${period}` : ''}`) })
-
-export const useBalances = () => useQuery({ queryKey: revenueKeys.balances, queryFn: () => api<CreatorBalance[]>('/admin/payouts/balances') })
-
-export const usePayouts = () => useQuery({ queryKey: revenueKeys.payouts, queryFn: () => api<Payout[]>('/admin/payouts') })
 
 /** Admins pass a creator id; creators read their own statement. */
 export const useStatement = (creatorId: number | 'me' | null, period: string) =>
@@ -29,6 +23,7 @@ function useInvalidateMoney() {
   const queryClient = useQueryClient()
   return () => {
     queryClient.invalidateQueries({ queryKey: ['revenue'] })
+    queryClient.invalidateQueries({ queryKey: ['payouts'] })
     queryClient.invalidateQueries({ queryKey: ['dashboard'] })
     queryClient.invalidateQueries({ queryKey: ['audit'] })
   }
@@ -59,14 +54,6 @@ export function useImportRevenue() {
       form.append('file', file)
       return api<{ imported: number }>(`/admin/revenue/import?period=${period}`, { method: 'POST', body: form })
     },
-    onSuccess,
-  })
-}
-
-export function usePay() {
-  const onSuccess = useInvalidateMoney()
-  return useMutation({
-    mutationFn: (body: { creatorId: number; externalRef: string; remarks?: string }) => api<Payout>('/admin/payouts', { method: 'POST', json: body }),
     onSuccess,
   })
 }

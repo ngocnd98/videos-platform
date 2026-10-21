@@ -1,7 +1,8 @@
 # PulseMedia Hub — demo
 
-Demo of the main flow from `prototype-v104.html`:
-creator upload → admin review → manual publishing → revenue & payout.
+Demo of the main flow from `prototype-v1.06.html`:
+creator upload → admin review → manual publishing → revenue → payouts, plus the admin workspace pages
+(users & roles, creator management, categories, CMS pages, settings & audit, analytics).
 
 | Part | Stack |
 |---|---|
@@ -22,11 +23,20 @@ creator upload → admin review → manual publishing → revenue & payout.
 3. Publishing → *Ready to publish* → *Download original* → *Record publishing* with YouTube/TikTok/Instagram
    links (checked as you type). *Export* gives a CSV.
 4. Revenue → *Manual entry* or *CSV import* (sample file in the dialog); edit gross inline to see the
-   60/40 split recalculate. *Unpaid balances* → *Mark as paid* with the bank reference.
-5. **Creator**: Dashboard shows the new pending payout / total earned; *Payout statement* prints a monthly statement.
+   creator/platform split recalculate. Lines that belong to a payout are locked.
+5. Payouts → settle the pending payout with a transfer reference, or *Create payout* for a creator and month
+   (live preview of eligible lines). *Cancel* releases the lines for a later payout.
+6. Creator management → change a creator's share (applies to new revenue only), suspend an account
+   (that creator can no longer sign in), hide a public page. Users & roles → invite an admin; the last
+   active admin can't be deactivated. Categories / CMS pages / Settings & audit work the same way.
+7. **Creator**: Dashboard, *My earnings & payouts*, *My profile* (edit profile, preview the public page),
+   *My publications*. In *Upload videos* a finished upload stays a draft until *Submit for review*;
+   drafts and rejected videos can be edited or deleted, submissions withdrawn.
 
-Not built in this demo: Analytics, My profile and Staff & roles pages (placeholders), staff-role permissions,
-resubmitting a rejected video from the UI, email notifications.
+Use the header profile button to switch workspace or sign in as another seeded account.
+
+Not built in this demo: self-registration / email verification / password reset, staff-role permissions,
+email notifications, receipt upload for settlements.
 
 ## Run locally
 
@@ -49,6 +59,7 @@ Open http://localhost:5173. Use the **Admin / Creator** switch in the header; it
 | Account | Role |
 |---|---|
 | `admin@pulsemedia.demo` | Admin (Superadmin) |
+| `ops@pulsemedia.demo` | Admin (Moderator) |
 | `alex@pulsemedia.demo` | Creator (Alex Rivers) |
 | `maya@pulsemedia.demo`, `jordan@pulsemedia.demo` | Creators |
 

@@ -7,12 +7,14 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.pulsemedia.hub.common.ApiException;
 import com.pulsemedia.hub.common.AuditLog;
+import com.pulsemedia.hub.review.ReviewDtos.InfoCorrection;
 import com.pulsemedia.hub.review.ReviewDtos.QueueItem;
 import com.pulsemedia.hub.review.ReviewDtos.RejectRequest;
 import com.pulsemedia.hub.review.ReviewDtos.ReviewDetail;
 import com.pulsemedia.hub.review.ReviewRepository.ReviewRow;
 import com.pulsemedia.hub.security.CurrentUser;
 import com.pulsemedia.hub.storage.ObjectStorage;
+import com.pulsemedia.hub.video.VideoRepository;
 
 @Service
 public class ReviewService {
@@ -28,17 +30,19 @@ public class ReviewService {
     private final ReviewRepository reviews;
     private final ObjectStorage storage;
     private final AuditLog audit;
+    private final VideoRepository videos;
 
-    public ReviewService(ReviewRepository reviews, ObjectStorage storage, AuditLog audit) {
+    public ReviewService(ReviewRepository reviews, ObjectStorage storage, AuditLog audit, VideoRepository videos) {
         this.reviews = reviews;
         this.storage = storage;
         this.audit = audit;
+        this.videos = videos;
     }
 
     public List<QueueItem> queue() {
         return reviews.queue().stream()
                 .map(r -> new QueueItem(r.code(), r.title(), r.creator(), r.categoryId(), r.category(), r.durationSec(),
-                        r.thumbColor(), presign(r.thumbnailKey()), r.submittedAt()))
+                        r.thumbColor(), presign(r.thumbnailKey()), r.submittedAt(), r.creatorCountry(), r.tags()))
                 .toList();
     }
 
@@ -47,6 +51,21 @@ public class ReviewService {
         return new ReviewDetail(r.code(), r.title(), r.description(), r.tags(), r.status(), r.creator(), r.category(),
                 r.durationSec(), r.thumbColor(), presign(r.thumbnailKey()), presign(r.originalKey()), r.fileName(),
                 r.sizeBytes(), r.submittedAt());
+    }
+
+    @Transactional
+    public ReviewDetail correctInfo(CurrentUser admin, String code, InfoCorrection req) {
+        ReviewRow r = find(code);
+        var category = videos.category(req.categoryId()).orElseThrow(() -> ApiException.badRequest("Unknown category."));
+        if (VideoRepository.tagCount(req.tags()) > 10) {
+            throw ApiException.badRequest("A video can have up to 10 tags.");
+        }
+        String tags = VideoRepository.normalizeTags(req.tags());
+        if (!reviews.correctInfo(r.id(), req.title().trim(), category.id(), tags)) {
+            throw ApiException.conflict("This video is no longer waiting for review.");
+        }
+        audit.record("VIDEO", r.code(), req.title().trim(), "Info corrected", "Category: " + category.name() + ".", admin.id());
+        return detail(code);
     }
 
     @Transactional

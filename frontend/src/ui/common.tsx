@@ -14,12 +14,26 @@ const STATUS_CLASS: Record<string, string> = {
   Published: 'bg-sky-50 text-sky-700 border border-sky-200/60',
   Paid: 'bg-emerald-50 text-emerald-700 border border-emerald-200/60',
   Draft: 'bg-slate-100 text-slate-600 border border-slate-200',
+  Cancelled: 'bg-slate-100 text-slate-500 border border-slate-200',
+  Active: 'bg-emerald-50 text-emerald-700 border border-emerald-200/60',
+  Suspended: 'bg-rose-50 text-rose-700 border border-rose-200/60',
+  Invited: 'bg-sky-50 text-sky-700 border border-sky-200/60',
+  Visible: 'bg-emerald-50 text-emerald-700 border border-emerald-200/60',
+  Hidden: 'bg-slate-100 text-slate-600 border border-slate-200',
+  Removed: 'bg-rose-50 text-rose-700 border border-rose-200/60',
+  'Needs attention': 'bg-amber-50 text-amber-700 border border-amber-200/60',
 }
 
 const PLATFORM_CLASS: Record<string, string> = {
   YouTube: 'bg-red-50 text-red-600 border border-red-200',
   TikTok: 'bg-slate-900 text-white',
   Instagram: 'bg-fuchsia-50 text-fuchsia-600 border border-fuchsia-200',
+}
+
+export const PUBLICATION_STATUS_LABEL: Record<string, string> = {
+  PUBLISHED: 'Published',
+  REMOVED: 'Removed',
+  NEEDS_ATTENTION: 'Needs attention',
 }
 
 export function Badge({ text, className }: { text: string; className?: string }) {
@@ -154,5 +168,19 @@ export function ErrorCard({ message, onRetry }: { message: string; onRetry?: () 
         </button>
       )}
     </section>
+  )
+}
+
+export function MiniNote({ icon: Icon, title, text }: { icon: LucideIcon; title: string; text: string }) {
+  return (
+    <div className="card flex gap-3 p-4">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
+        <Icon className="h-4 w-4" />
+      </span>
+      <div>
+        <div className="text-xs font-semibold text-slate-800">{title}</div>
+        <p className="mt-1 text-[11px] leading-relaxed text-slate-500">{text}</p>
+      </div>
+    </div>
   )
 }

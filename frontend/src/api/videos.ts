@@ -39,4 +39,5 @@ export const videoApi = {
     return api<Video>(`${base(code)}/thumbnail`, { method: 'POST', body: form })
   },
   submit: (code: string) => api<Video>(`${base(code)}/submit`, { method: 'POST' }),
+  withdraw: (code: string) => api<Video>(`${base(code)}/withdraw`, { method: 'POST' }),
 }

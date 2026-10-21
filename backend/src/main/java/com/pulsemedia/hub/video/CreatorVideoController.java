@@ -101,6 +101,11 @@ public class CreatorVideoController {
         return service.saveThumbnail(user, code, file.getBytes(), file.getContentType());
     }
 
+    @PostMapping("/{code}/withdraw")
+    VideoDto withdraw(@AuthenticationPrincipal CurrentUser user, @PathVariable String code) {
+        return service.withdraw(user, code);
+    }
+
     @PostMapping("/{code}/submit")
     VideoDto submit(@AuthenticationPrincipal CurrentUser user, @PathVariable String code) {
         return service.submit(user, code);

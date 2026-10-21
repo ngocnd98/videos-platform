@@ -22,6 +22,7 @@ public final class VideoDtos {
             @Size(max = 500) String description,
             @NotNull Long categoryId,
             @Size(max = 200) String tags,
+            @Size(max = 30) String language,
             @Min(0) Integer durationSec) {
     }
 
@@ -32,6 +33,7 @@ public final class VideoDtos {
             Long categoryId,
             String category,
             String tags,
+            String language,
             String status,
             Integer durationSec,
             long views,
@@ -64,6 +66,15 @@ public final class VideoDtos {
     public record CompleteUploadRequest(@NotEmpty List<@Valid CompletedPartDto> parts) {
     }
 
-    public record Category(long id, String name) {
+    public record Category(long id, String name, boolean visible) {
+    }
+
+    public record AdminCategory(long id, String name, boolean visible, int videos) {
+    }
+
+    public record NewCategory(@NotBlank @Size(max = 40) String name) {
+    }
+
+    public record CategoryUpdate(@Size(max = 40) String name, Boolean visible) {
     }
 }

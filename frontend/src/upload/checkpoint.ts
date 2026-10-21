@@ -14,6 +14,8 @@ export interface FormValues {
   categoryId: string
   tags: string
   description: string
+  /** Missing in checkpoints saved before v1.06. */
+  language?: string
 }
 
 const KEY = 'pmh.uploadCheckpoint'

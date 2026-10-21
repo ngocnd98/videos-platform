@@ -1,11 +1,11 @@
 import { Link } from 'react-router'
-import { Clock3, DollarSign, ListChecks, Radio, UsersRound } from 'lucide-react'
+import { CircleCheck, Clock3, HardDrive, ListChecks, Wallet } from 'lucide-react'
 import { useAdminDashboard } from '../../api/dashboard'
 import { useAuth } from '../../auth/AuthContext'
 import { RevenueLineChart } from '../../components/RevenueLineChart'
 import { useReviewActions } from '../../components/review/useReviewActions'
-import { Badge, CardHeading, ErrorCard, LoadingCards, PlatformBadge, StatCard, Thumb, TitleBlock, TrendPill, money } from '../../ui/common'
-import { cents, formatDate, formatDuration, formatMonth, formatPercent, greeting, percentChange } from '../../ui/format'
+import { Badge, CardHeading, ErrorCard, LoadingCards, PUBLICATION_STATUS_LABEL, PlatformBadge, StatCard, Thumb, TitleBlock, TrendPill, money } from '../../ui/common'
+import { cents, formatDate, formatDuration, formatMonth, greeting, percentChange } from '../../ui/format'
 
 export function AdminDashboardPage() {
   const { user } = useAuth()
@@ -31,39 +31,36 @@ export function AdminDashboardPage() {
   if (isPending) return <>{header}<LoadingCards /></>
   if (error) return <>{header}<ErrorCard message={error.message} onRetry={() => refetch()} /></>
 
-  const publishedChange = percentChange(data.publishedLast7Days, data.publishedPrev7Days)
   const grossChange = percentChange(data.grossThisMonthCents, data.grossLastMonthCents)
   const currentMonth = data.revenueByMonth[data.revenueByMonth.length - 1]?.month
+  const usedGb = data.storageUsedBytes / 1024 ** 3
+  const storagePct = data.storageQuotaGb ? Math.round((usedGb / data.storageQuotaGb) * 100) : 0
 
   return (
     <>
       {header}
       <section className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Pending review" value={data.pendingReview} foot={`${data.submittedToday} submitted today`} icon={Clock3} color="amber" />
+        <Link to="/publishing" className="block">
+          <StatCard label="Approved · not published" value={data.approvedUnpublished} foot="Ready for manual publishing" icon={CircleCheck} color="sky" trend="Queue" />
+        </Link>
+        <Link to="/payouts" className="block">
+          <StatCard
+            label="Unpaid payouts"
+            value={data.pendingPayouts}
+            foot={`${money(cents(data.pendingPayoutCents))} pending settlement`}
+            icon={Wallet}
+            color="emerald"
+            trend="View"
+          />
+        </Link>
         <StatCard
-          label="Published · last 7 days"
-          value={data.publishedLast7Days}
-          foot="Across all platforms"
-          icon={Radio}
-          color="sky"
-          trend={publishedChange == null ? undefined : formatPercent(publishedChange)}
-          direction={publishedChange != null && publishedChange < 0 ? 'down' : 'up'}
-        />
-        <StatCard
-          label="Gross revenue · this month"
-          value={money(cents(data.grossThisMonthCents))}
-          foot={`Across ${data.platformCount} platforms`}
-          icon={DollarSign}
-          color="emerald"
-          trend={grossChange == null ? undefined : formatPercent(grossChange)}
-          direction={grossChange != null && grossChange < 0 ? 'down' : 'up'}
-        />
-        <StatCard
-          label="Active creators"
-          value={data.activeCreators}
-          foot={`${data.creatorsJoinedThisMonth} joined this month`}
-          icon={UsersRound}
+          label="Storage used"
+          value={`${usedGb < 10 ? usedGb.toFixed(1) : Math.round(usedGb)} GB`}
+          foot={`of ${data.storageQuotaGb} GB creator quota`}
+          icon={HardDrive}
           color="violet"
+          trend={`${storagePct}%`}
         />
       </section>
 
@@ -134,12 +131,13 @@ export function AdminDashboardPage() {
             action={<Link to="/publishing" className="text-xs font-semibold text-indigo-600">Publishing tracker →</Link>}
           />
           <div className="table-wrap">
-            <table className="w-full min-w-[700px] text-left text-xs">
+            <table className="w-full min-w-[800px] text-left text-xs">
               <thead className="bg-slate-50/80 text-[10px] uppercase tracking-wider text-slate-500">
                 <tr>
                   <th className="px-5 py-3 font-semibold">Video</th>
                   <th className="px-4 py-3 font-semibold">Creator</th>
                   <th className="px-4 py-3 font-semibold">Platform</th>
+                  <th className="px-4 py-3 font-semibold">Channel</th>
                   <th className="px-4 py-3 font-semibold">Published</th>
                   <th className="px-5 py-3 font-semibold">Status</th>
                 </tr>
@@ -147,7 +145,7 @@ export function AdminDashboardPage() {
               <tbody className="divide-y divide-slate-100">
                 {data.recentPublications.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-5 py-12 text-center text-sm text-slate-500">No videos published yet.</td>
+                    <td colSpan={6} className="px-5 py-12 text-center text-sm text-slate-500">No videos published yet.</td>
                   </tr>
                 )}
                 {data.recentPublications.map(row => (
@@ -162,8 +160,9 @@ export function AdminDashboardPage() {
                     </td>
                     <td className="px-4 py-3 text-slate-600">{row.creator}</td>
                     <td className="px-4 py-3"><PlatformBadge platform={row.platform} /></td>
+                    <td className="px-4 py-3 text-slate-600">{row.channel ?? '—'}</td>
                     <td className="px-4 py-3 text-slate-500">{formatDate(row.publishedAt)}</td>
-                    <td className="px-5 py-3"><Badge text="Published" /></td>
+                    <td className="px-5 py-3"><Badge text={PUBLICATION_STATUS_LABEL[row.status] ?? 'Published'} /></td>
                   </tr>
                 ))}
               </tbody>

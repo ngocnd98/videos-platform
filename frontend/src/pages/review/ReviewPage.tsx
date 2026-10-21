@@ -1,20 +1,37 @@
 import { useMemo, useState } from 'react'
-import { Eye, History, MessageSquareText, ShieldCheck, type LucideIcon } from 'lucide-react'
+import { Eye, History, MessageSquareText, ShieldCheck } from 'lucide-react'
 import { useReviewQueue } from '../../api/review'
+import type { ReviewQueueItem } from '../../api/types'
 import { useCategories } from '../../api/videos'
 import { AuditDrawer } from '../../components/review/AuditDrawer'
 import { useReviewActions } from '../../components/review/useReviewActions'
-import { Badge, ErrorCard, Thumb, TitleBlock } from '../../ui/common'
-import { formatDuration, formatRelativeDay } from '../../ui/format'
+import { Badge, ErrorCard, MiniNote, Thumb, TitleBlock } from '../../ui/common'
+import { countryLabel, formatDuration, formatRelativeDay } from '../../ui/format'
+import { EditInfoModal } from './EditInfoModal'
 
 export function ReviewPage() {
   const { data = [], isPending, error, refetch } = useReviewQueue()
   const { data: categories = [] } = useCategories()
   const [categoryId, setCategoryId] = useState('')
+  const [creator, setCreator] = useState('')
+  const [country, setCountry] = useState('')
   const [auditOpen, setAuditOpen] = useState(false)
+  const [editing, setEditing] = useState<ReviewQueueItem | null>(null)
   const actions = useReviewActions()
 
-  const rows = useMemo(() => (categoryId ? data.filter(r => String(r.categoryId) === categoryId) : data), [data, categoryId])
+  const creators = useMemo(() => [...new Set(data.map(r => r.creator))].sort(), [data])
+  const countries = useMemo(() => [...new Set(data.map(r => r.creatorCountry).filter((c): c is string => !!c))].sort(), [data])
+  const rows = useMemo(
+    () =>
+      data.filter(
+        r =>
+          (!categoryId || String(r.categoryId) === categoryId) &&
+          (!creator || r.creator === creator) &&
+          (!country || r.creatorCountry === country),
+      ),
+    [data, categoryId, creator, country],
+  )
+  const filtered = !!(categoryId || creator || country)
 
   return (
     <>
@@ -31,12 +48,24 @@ export function ReviewPage() {
           <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="text-sm font-semibold text-slate-900">Review queue</h2>
-              <p className="mt-1 text-xs text-slate-500">Approve, reject, or inspect a video before it goes live.</p>
+              <p className="mt-1 text-xs text-slate-500">Review the original, correct metadata, then approve or reject. Decisions apply only while status is In Review.</p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <select aria-label="Filter by creator" className="input !w-auto !py-2 text-xs" value={creator} onChange={e => setCreator(e.target.value)}>
+                <option value="">All creators</option>
+                {creators.map(c => (
+                  <option key={c}>{c}</option>
+                ))}
+              </select>
+              <select aria-label="Filter by country" className="input !w-auto !py-2 text-xs" value={country} onChange={e => setCountry(e.target.value)}>
+                <option value="">All countries</option>
+                {countries.map(c => (
+                  <option key={c} value={c}>{countryLabel(c)}</option>
+                ))}
+              </select>
               <select aria-label="Filter by category" className="input !w-auto !py-2 text-xs" value={categoryId} onChange={e => setCategoryId(e.target.value)}>
                 <option value="">All categories</option>
-                {categories.map(c => (
+                {categories.filter(c => c.visible).map(c => (
                   <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
               </select>
@@ -62,7 +91,7 @@ export function ReviewPage() {
                 {rows.length === 0 && (
                   <tr>
                     <td colSpan={6} className="px-5 py-12 text-center text-sm text-slate-500">
-                      {isPending ? 'Loading the review queue…' : categoryId ? 'No videos in this category are waiting for review.' : 'No videos are waiting for review.'}
+                      {isPending ? 'Loading the review queue…' : filtered ? 'No videos match these filters.' : 'No videos are waiting for review.'}
                     </td>
                   </tr>
                 )}
@@ -87,6 +116,7 @@ export function ReviewPage() {
                     <td className="px-5 py-3.5">
                       <div className="flex justify-end gap-2">
                         <button onClick={() => actions.preview(item.code)} className="btn-secondary rounded-lg px-3 py-2 text-[10px] font-semibold">Preview</button>
+                        <button onClick={() => setEditing(item)} className="btn-secondary rounded-lg px-3 py-2 text-[10px] font-semibold">Edit info</button>
                         <button onClick={() => actions.reject(item.code, item.title)} className="btn-secondary rounded-lg px-3 py-2 text-[10px] font-semibold text-rose-600 hover:bg-rose-50">Reject</button>
                         <button
                           onClick={() => actions.approve(item.code, item.title)}
@@ -117,20 +147,7 @@ export function ReviewPage() {
       </div>
       {actions.dialogs}
       {auditOpen && <AuditDrawer onClose={() => setAuditOpen(false)} />}
+      {editing && <EditInfoModal item={editing} onClose={() => setEditing(null)} />}
     </>
-  )
-}
-
-function MiniNote({ icon: Icon, title, text }: { icon: LucideIcon; title: string; text: string }) {
-  return (
-    <div className="card flex gap-3 p-4">
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
-        <Icon className="h-4 w-4" />
-      </span>
-      <div>
-        <div className="text-xs font-semibold text-slate-800">{title}</div>
-        <p className="mt-1 text-[11px] leading-relaxed text-slate-500">{text}</p>
-      </div>
-    </div>
   )
 }

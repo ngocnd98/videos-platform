@@ -14,13 +14,17 @@ import com.pulsemedia.hub.common.ApiException;
 import com.pulsemedia.hub.common.AuditLog;
 import com.pulsemedia.hub.publishing.PublishingDtos.DownloadUrl;
 import com.pulsemedia.hub.publishing.PublishingDtos.PlatformLink;
+import com.pulsemedia.hub.publishing.PublishingDtos.Publication;
 import com.pulsemedia.hub.publishing.PublishingDtos.PublicationInput;
+import com.pulsemedia.hub.publishing.PublishingDtos.PublicationUpdate;
 import com.pulsemedia.hub.publishing.PublishingDtos.PublishRequest;
 import com.pulsemedia.hub.publishing.PublishingDtos.PublishingVideo;
 import com.pulsemedia.hub.publishing.PublishingRepository.ExportRow;
 import com.pulsemedia.hub.publishing.PublishingRepository.LinkRow;
+import com.pulsemedia.hub.publishing.PublishingRepository.PublicationRow;
 import com.pulsemedia.hub.publishing.PublishingRepository.VideoRow;
 import com.pulsemedia.hub.security.CurrentUser;
+import com.pulsemedia.hub.settings.SettingsService;
 import com.pulsemedia.hub.storage.ObjectStorage;
 
 /**
@@ -34,12 +38,16 @@ public class PublishingService {
 
     private final PublishingRepository repo;
     private final ObjectStorage storage;
-    private final AuditLog audit;
+    private static final Set<String> PUBLICATION_STATUSES = Set.of("PUBLISHED", "REMOVED", "NEEDS_ATTENTION");
 
-    public PublishingService(PublishingRepository repo, ObjectStorage storage, AuditLog audit) {
+    private final AuditLog audit;
+    private final SettingsService settings;
+
+    public PublishingService(PublishingRepository repo, ObjectStorage storage, AuditLog audit, SettingsService settings) {
         this.repo = repo;
         this.storage = storage;
         this.audit = audit;
+        this.settings = settings;
     }
 
     public List<PublishingVideo> videos(String status) {
@@ -70,6 +78,7 @@ public class PublishingService {
         Set<String> seen = new HashSet<>();
         List<String> errors = new ArrayList<>();
         for (PublicationInput p : req.publications()) {
+            settings.requireEnabled(p.platform());
             if (!seen.add(p.platform())) {
                 errors.add(p.platform() + " is listed twice");
             } else if (!PlatformUrls.isValid(p.platform(), p.url())) {
@@ -79,24 +88,61 @@ public class PublishingService {
         if (!errors.isEmpty()) {
             throw ApiException.badRequest(String.join("; ", errors) + ".");
         }
-        String note = req.note() == null || req.note().isBlank() ? null : req.note().trim();
+        String note = blankToNull(req.note());
+        String channel = blankToNull(req.channel());
         for (PublicationInput p : req.publications()) {
             long platformId = repo.platformId(p.platform())
                     .orElseThrow(() -> ApiException.badRequest("Unknown platform " + p.platform()));
-            repo.upsertPublication(v.id(), platformId, p.url().trim(), note, admin.id());
+            if (repo.urlUsedElsewhere(p.url().trim(), v.id(), platformId)) {
+                throw ApiException.conflict("This published URL is already recorded.");
+            }
+            repo.upsertPublication(v.id(), platformId, p.url().trim(), channel, note, admin.id());
         }
         repo.markPublished(v.id());
         String platforms = req.publications().stream().map(PublicationInput::platform).collect(Collectors.joining(", "));
-        audit.record("VIDEO", v.code(), v.title(), "Published", "Published to " + platforms + (note == null ? "" : " · " + note), admin.id());
+        audit.record("VIDEO", v.code(), v.title(), "Published", "Published to " + platforms
+                + (channel == null ? "" : " · " + channel) + (note == null ? "" : " · " + note), admin.id());
         VideoRow updated = find(code);
         return toDto(updated, repo.links(List.of(updated.id())));
     }
 
+    public List<Publication> publications() {
+        return repo.publications().stream().map(this::toPublication).toList();
+    }
+
+    public List<Publication> creatorPublications(long creatorId) {
+        return repo.creatorPublications(creatorId).stream().map(this::toPublication).toList();
+    }
+
+    /** Corrects a single platform link: channel, URL, status (e.g. removed by the platform) and note. */
+    @Transactional
+    public Publication updatePublication(CurrentUser admin, long id, PublicationUpdate req) {
+        PublicationRow row = repo.publication(id).orElseThrow(() -> ApiException.notFound("Publication not found."));
+        if (!PUBLICATION_STATUSES.contains(req.status())) {
+            throw ApiException.badRequest("status must be PUBLISHED, REMOVED or NEEDS_ATTENTION.");
+        }
+        String url = req.url().trim();
+        if (!PlatformUrls.isValid(row.platform(), url)) {
+            throw ApiException.badRequest("Enter a valid " + row.platform() + " URL.");
+        }
+        long platformId = repo.platformId(row.platform()).orElseThrow();
+        if (repo.urlUsedElsewhere(url, row.videoId(), platformId)) {
+            throw ApiException.conflict("This published URL is already recorded.");
+        }
+        repo.updatePublication(id, blankToNull(req.channel()), url, req.status(), blankToNull(req.note()));
+        PublicationRow updated = repo.publication(id).orElseThrow();
+        audit.record("VIDEO", updated.code(), updated.title(), "Publication updated",
+                updated.platform() + " · " + (updated.channel() == null ? "No channel" : updated.channel()) + " · "
+                        + updated.status().charAt(0) + updated.status().substring(1).toLowerCase().replace('_', ' '), admin.id());
+        return toPublication(updated);
+    }
+
     public String exportCsv() {
-        StringBuilder csv = new StringBuilder("Video ID,Title,Creator,Platform,URL,Published at,Published by,Note\n");
+        StringBuilder csv = new StringBuilder("Video ID,Title,Creator,Platform,Channel,Status,URL,Published at,Published by,Note\n");
         for (ExportRow r : repo.export()) {
             csv.append(String.join(",", cell(r.code()), cell(r.title()), cell(r.creator()), cell(r.platform()),
-                    cell(r.url()), cell(r.publishedAt()), cell(r.publishedBy()), cell(r.note()))).append('\n');
+                    cell(r.channel()), cell(r.status()), cell(r.url()), cell(r.publishedAt()), cell(r.publishedBy()),
+                    cell(r.note()))).append('\n');
         }
         return csv.toString();
     }
@@ -118,6 +164,17 @@ public class PublishingService {
         String thumb = r.thumbnailKey() != null && storage.isConfigured() ? storage.presignGet(r.thumbnailKey(), null) : null;
         return new PublishingVideo(r.code(), r.title(), r.creator(), r.status(), r.thumbColor(), thumb,
                 r.originalKey() != null, r.approvedAt(), r.firstPublishedAt(),
-                links.stream().map(l -> new PlatformLink(l.platform(), l.url(), l.note(), l.publishedAt())).toList());
+                links.stream().map(l -> new PlatformLink(l.id(), l.platform(), l.url(), l.channel(), l.status(), l.note(),
+                        l.publishedAt())).toList());
+    }
+
+    private Publication toPublication(PublicationRow r) {
+        String thumb = r.thumbnailKey() != null && storage.isConfigured() ? storage.presignGet(r.thumbnailKey(), null) : null;
+        return new Publication(r.id(), r.code(), r.title(), r.creator(), r.platform(), r.channel(), r.url(), r.note(),
+                r.status(), r.publishedAt(), r.thumbColor(), thumb);
+    }
+
+    private static String blankToNull(String s) {
+        return s == null || s.isBlank() ? null : s.trim();
     }
 }

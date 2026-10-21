@@ -22,9 +22,11 @@ import com.pulsemedia.hub.common.ApiException;
 import com.pulsemedia.hub.revenue.RevenueDtos.CreatorBalance;
 import com.pulsemedia.hub.revenue.RevenueDtos.GrossUpdate;
 import com.pulsemedia.hub.revenue.RevenueDtos.ImportResult;
+import com.pulsemedia.hub.revenue.RevenueDtos.MarkPaid;
 import com.pulsemedia.hub.revenue.RevenueDtos.NewEntry;
 import com.pulsemedia.hub.revenue.RevenueDtos.NewPayout;
 import com.pulsemedia.hub.revenue.RevenueDtos.Payout;
+import com.pulsemedia.hub.revenue.RevenueDtos.PayoutPreview;
 import com.pulsemedia.hub.revenue.RevenueDtos.RevenueEntry;
 import com.pulsemedia.hub.revenue.RevenueDtos.RevenuePage;
 import com.pulsemedia.hub.revenue.RevenueDtos.Statement;
@@ -83,10 +85,33 @@ public class RevenueController {
         return service.payouts();
     }
 
+    @GetMapping("/api/admin/payouts/preview")
+    PayoutPreview preview(@RequestParam long creatorId, @RequestParam String period) {
+        if (!period.matches(RevenueDtos.PERIOD_PATTERN)) {
+            throw ApiException.badRequest("period must look like 2026-10.");
+        }
+        return service.preview(creatorId, period);
+    }
+
     @PostMapping("/api/admin/payouts")
     @ResponseStatus(HttpStatus.CREATED)
-    Payout pay(@AuthenticationPrincipal CurrentUser admin, @Valid @RequestBody NewPayout body) {
-        return service.pay(admin, body);
+    Payout create(@AuthenticationPrincipal CurrentUser admin, @Valid @RequestBody NewPayout body) {
+        return service.createPayout(admin, body);
+    }
+
+    @PostMapping("/api/admin/payouts/{id}/paid")
+    Payout markPaid(@AuthenticationPrincipal CurrentUser admin, @PathVariable long id, @Valid @RequestBody MarkPaid body) {
+        return service.markPaid(admin, id, body);
+    }
+
+    @PostMapping("/api/admin/payouts/{id}/cancel")
+    Payout cancel(@AuthenticationPrincipal CurrentUser admin, @PathVariable long id) {
+        return service.cancel(admin, id);
+    }
+
+    @GetMapping("/api/creator/payouts")
+    List<Payout> creatorPayouts(@AuthenticationPrincipal CurrentUser user) {
+        return service.creatorPayouts(user.creatorId());
     }
 
     @GetMapping("/api/admin/creators/{creatorId}/statement")

@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
-import { CircleDollarSign, Eye, FileCheck2, FileText, Landmark, Plus, Wallet } from 'lucide-react'
+import { CircleDollarSign, ExternalLink, Eye, FileCheck2, FileText, Landmark, Plus, Wallet } from 'lucide-react'
 import { useCreatorDashboard } from '../../api/dashboard'
 import { StatementModal } from '../../components/StatementModal'
+import { PublicProfileModal } from '../profile/PublicProfileModal'
 import type { CreatorProfile } from '../../api/types'
 import { Badge, CardHeading, ErrorCard, LoadingCards, MiniStat, Thumb, TitleBlock, money } from '../../ui/common'
 import { STATUS_LABEL, cents, compactNumber, countryName, formatDate } from '../../ui/format'
@@ -94,6 +95,7 @@ export function CreatorDashboardPage() {
 }
 
 function ProfileCard({ profile }: { profile: CreatorProfile }) {
+  const [previewOpen, setPreviewOpen] = useState(false)
   const initials = profile.displayName.split(/\s+/).map(p => p[0]).join('').slice(0, 2).toUpperCase()
   const platformPct = 100 - profile.splitPct
   return (
@@ -137,11 +139,16 @@ function ProfileCard({ profile }: { profile: CreatorProfile }) {
               <span className="ml-1 text-[10px] text-slate-500">Platform</span>
             </div>
           </div>
-          {profile.contractSignedAt && (
-            <div className="mt-2 text-[10px] text-indigo-700/70">Active contract · Signed {formatDate(profile.contractSignedAt)}</div>
-          )}
+          <div className="mt-2 text-[10px] text-indigo-700/70">
+            {profile.contractSignedAt && `Active contract · Signed ${formatDate(profile.contractSignedAt)} · `}Share change applies to new revenue only.
+          </div>
         </div>
+        <button onClick={() => setPreviewOpen(true)} className="btn-secondary mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold">
+          <ExternalLink className="h-4 w-4" />
+          Preview public profile
+        </button>
       </div>
+      {previewOpen && <PublicProfileModal onClose={() => setPreviewOpen(false)} />}
     </section>
   )
 }

@@ -43,12 +43,19 @@ public final class RevenueDtos {
                                  int entries, long pendingCents) {
     }
 
-    public record Payout(long id, long creatorId, String creator, long amountCents, String status,
-                         String externalRef, String remarks, String paidAt, int entries) {
+    /** status is PENDING, PAID or CANCELLED (derived from cancelled_at). */
+    public record Payout(long id, String payoutCode, long creatorId, String creator, String period, long amountCents,
+                         String status, String payoutMethod, String externalRef, String remarks, String createdAt,
+                         String paidAt, int entries) {
     }
 
-    public record NewPayout(@NotNull Long creatorId, @NotBlank @Size(max = 100) String externalRef,
-                            @Size(max = 300) String remarks) {
+    public record NewPayout(@NotNull Long creatorId, @NotBlank @Pattern(regexp = PERIOD_PATTERN) String period) {
+    }
+
+    public record MarkPaid(@NotBlank @Size(max = 100) String externalRef, @Size(max = 300) String remarks) {
+    }
+
+    public record PayoutPreview(long creatorId, String period, int entries, long amountCents, String payoutMethod) {
     }
 
     public record StatementLine(String videoCode, String videoTitle, String platform, long grossCents,

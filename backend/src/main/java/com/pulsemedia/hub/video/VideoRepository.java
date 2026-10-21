@@ -6,6 +6,7 @@ import java.util.Optional;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
+import com.pulsemedia.hub.video.VideoDtos.AdminCategory;
 import com.pulsemedia.hub.video.VideoDtos.Category;
 import com.pulsemedia.hub.video.VideoDtos.VideoMetadata;
 
@@ -14,7 +15,7 @@ public class VideoRepository {
 
     /** Row shape shared by the creator endpoints. */
     public record VideoRow(long id, String code, long creatorId, String title, String description, Long categoryId,
-                           String category, String tags, String status, Integer durationSec, long views,
+                           String category, String tags, String language, String status, Integer durationSec, long views,
                            String thumbColor, String createdAt, String submittedAt) {
     }
 
@@ -24,7 +25,7 @@ public class VideoRepository {
 
     private static final String SELECT_VIDEO = """
             SELECT v.id, v.code, v.creator_id, v.title, v.description, v.category_id, c.name AS category, v.tags,
-                   v.status, v.duration_sec, v.views, v.thumb_color, v.created_at, v.submitted_at
+                   v.language, v.status, v.duration_sec, v.views, v.thumb_color, v.created_at, v.submitted_at
             FROM videos v LEFT JOIN categories c ON c.id = v.category_id
             """;
 
@@ -41,11 +42,39 @@ public class VideoRepository {
     }
 
     public List<Category> categories() {
-        return jdbc.sql("SELECT id, name FROM categories ORDER BY name").query(Category.class).list();
+        return jdbc.sql("SELECT id, name, visible FROM categories ORDER BY name").query(Category.class).list();
     }
 
-    public boolean categoryExists(long id) {
-        return jdbc.sql("SELECT count(*) FROM categories WHERE id = ?").param(id).query(Integer.class).single() > 0;
+    public Optional<Category> category(long id) {
+        return jdbc.sql("SELECT id, name, visible FROM categories WHERE id = ?").param(id).query(Category.class).optional();
+    }
+
+    private static final String SELECT_ADMIN_CATEGORY = """
+            SELECT c.id, c.name, c.visible, (SELECT count(*) FROM videos v WHERE v.category_id = c.id) AS videos
+            FROM categories c
+            """;
+
+    public List<AdminCategory> adminCategories() {
+        return jdbc.sql(SELECT_ADMIN_CATEGORY + " ORDER BY c.name").query(AdminCategory.class).list();
+    }
+
+    public Optional<AdminCategory> adminCategory(long id) {
+        return jdbc.sql(SELECT_ADMIN_CATEGORY + " WHERE c.id = ?").param(id).query(AdminCategory.class).optional();
+    }
+
+    /** Case-insensitive name clash with another category. */
+    public boolean categoryNameTaken(String name, Long exceptId) {
+        return jdbc.sql("SELECT count(*) FROM categories WHERE lower(name) = lower(?) AND id <> ?")
+                .params(name.trim(), exceptId == null ? -1 : exceptId).query(Integer.class).single() > 0;
+    }
+
+    public long insertCategory(String name) {
+        jdbc.sql("INSERT INTO categories (name) VALUES (?)").param(name.trim()).update();
+        return jdbc.sql("SELECT last_insert_rowid()").query(Long.class).single();
+    }
+
+    public void updateCategory(long id, String name, boolean visible) {
+        jdbc.sql("UPDATE categories SET name = ?, visible = ? WHERE id = ?").params(name, visible ? 1 : 0, id).update();
     }
 
     public Optional<VideoRow> findByCode(String code) {
@@ -70,11 +99,11 @@ public class VideoRepository {
         String code = "V-" + next;
         String color = THUMB_COLORS.get(next % THUMB_COLORS.size());
         jdbc.sql("""
-                        INSERT INTO videos (code, creator_id, title, description, category_id, tags, status, duration_sec, thumb_color)
-                        VALUES (?, ?, ?, ?, ?, ?, 'DRAFT', ?, ?)
+                        INSERT INTO videos (code, creator_id, title, description, category_id, tags, language, status, duration_sec, thumb_color)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?, ?)
                         """)
                 .params(code, creatorId, m.title().trim(), blankToNull(m.description()), m.categoryId(),
-                        normalizeTags(m.tags()), m.durationSec(), color)
+                        normalizeTags(m.tags()), language(m.language()), m.durationSec(), color)
                 .update();
         return code;
     }
@@ -82,12 +111,13 @@ public class VideoRepository {
     public void updateMetadata(long videoId, VideoMetadata m) {
         jdbc.sql("""
                         UPDATE videos SET title = ?, description = ?, category_id = ?, tags = ?,
+                               language = coalesce(?, language),
                                duration_sec = coalesce(?, duration_sec),
                                updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
                         WHERE id = ?
                         """)
                 .params(m.title().trim(), blankToNull(m.description()), m.categoryId(), normalizeTags(m.tags()),
-                        m.durationSec(), videoId)
+                        blankToNull(m.language()), m.durationSec(), videoId)
                 .update();
     }
 
@@ -101,8 +131,18 @@ public class VideoRepository {
                 .param(videoId).update();
     }
 
+    /** Back to DRAFT before a reviewer decided; submitted_at is kept as history. */
+    public boolean withdraw(long videoId) {
+        return jdbc.sql("""
+                        UPDATE videos SET status = 'DRAFT', updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+                        WHERE id = ? AND status = 'IN_REVIEW'
+                        """)
+                .param(videoId).update() == 1;
+    }
+
     public void delete(long videoId) {
         jdbc.sql("DELETE FROM video_files WHERE video_id = ?").param(videoId).update();
+        jdbc.sql("DELETE FROM review_logs WHERE video_id = ?").param(videoId).update();
         jdbc.sql("DELETE FROM videos WHERE id = ?").param(videoId).update();
     }
 
@@ -159,7 +199,18 @@ public class VideoRepository {
         return s == null || s.isBlank() ? null : s.trim();
     }
 
-    private static String normalizeTags(String tags) {
+    private static String language(String language) {
+        String l = blankToNull(language);
+        return l == null ? "English" : l;
+    }
+
+    /** Number of distinct non-blank comma-separated tags. */
+    public static int tagCount(String tags) {
+        String normalized = normalizeTags(tags);
+        return normalized == null ? 0 : normalized.split(",").length;
+    }
+
+    public static String normalizeTags(String tags) {
         if (tags == null) {
             return null;
         }

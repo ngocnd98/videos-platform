@@ -93,8 +93,8 @@ class PublishingFlowTest {
                 .andExpect(jsonPath("$[1].platform").value("TikTok"))
                 .andExpect(jsonPath("$[1].videos").value(5));
         mvc.perform(get("/api/admin/publishing/export.csv").header("Authorization", admin))
-                .andExpect(content().string(startsWith("Video ID,Title,Creator,Platform,URL")))
-                .andExpect(content().string(containsString("V-2407,3 recipes in 30 seconds,Alex Rivers,YouTube,https://youtu.be/xyz789")));
+                .andExpect(content().string(startsWith("Video ID,Title,Creator,Platform,Channel,Status,URL")))
+                .andExpect(content().string(containsString("V-2407,3 recipes in 30 seconds,Alex Rivers,YouTube,,PUBLISHED,https://youtu.be/xyz789")));
         mvc.perform(get("/api/admin/audit?limit=1").header("Authorization", admin))
                 .andExpect(jsonPath("$[0].detail").value("Published to YouTube"));
     }

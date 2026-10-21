@@ -1,11 +1,13 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { ArrowUpRight, Camera, Download, Music2, Play, Plus, type LucideIcon } from 'lucide-react'
 import { downloadFile } from '../../api/client'
-import { fetchDownloadUrl, usePlatformSummary, usePublishingVideos } from '../../api/publishing'
-import type { Platform, PublishingVideo } from '../../api/types'
-import { Badge, CardHeading, ErrorCard, PlatformBadge, Thumb, TitleBlock } from '../../ui/common'
+import { fetchDownloadUrl, useMyPublications, usePlatformSummary, usePublications, usePublishingVideos } from '../../api/publishing'
+import type { Platform, Publication, PublishingVideo } from '../../api/types'
+import { useAuth } from '../../auth/AuthContext'
+import { Badge, CardHeading, ErrorCard, PUBLICATION_STATUS_LABEL, PlatformBadge, Thumb, TitleBlock } from '../../ui/common'
 import { compactNumber, formatDate } from '../../ui/format'
 import { useToast } from '../../ui/Toast'
+import { EditPublicationModal } from './EditPublicationModal'
 import { PublishModal } from './PublishModal'
 
 const PLATFORM_STYLE: Record<Platform, { icon: LucideIcon; className: string; label: string }> = {
@@ -15,11 +17,36 @@ const PLATFORM_STYLE: Record<Platform, { icon: LucideIcon; className: string; la
 }
 
 export function PublishingPage() {
+  const { mode } = useAuth()
+  return mode === 'creator' ? <CreatorPublications /> : <AdminPublishing />
+}
+
+function CreatorPublications() {
+  const { data, isPending, error, refetch } = useMyPublications()
+  return (
+    <>
+      <TitleBlock eyebrow="Creator portal" title="My published videos" description="Review the platform links and publishing status for your videos." />
+      <section className="card mb-5 overflow-hidden">
+        <CardHeading title="Platform performance" subtitle="Published content across your connected channels." />
+        <p className="px-5 py-4 text-xs text-slate-500">Only your own publications are listed below.</p>
+      </section>
+      {error ? (
+        <ErrorCard message={error.message} onRetry={() => refetch()} />
+      ) : (
+        <PublicationsTable title="Recent publications" subtitle="Review live links, channel and publishing history." rows={data} loading={isPending} />
+      )}
+    </>
+  )
+}
+
+function AdminPublishing() {
   const toast = useToast()
   const approved = usePublishingVideos('APPROVED')
   const published = usePublishingVideos('PUBLISHED')
   const summary = usePlatformSummary()
+  const publications = usePublications()
   const [modal, setModal] = useState<{ code?: string } | null>(null)
+  const [editing, setEditing] = useState<Publication | null>(null)
   const [downloading, setDownloading] = useState<string | null>(null)
 
   const publishable = [...(approved.data ?? []), ...(published.data ?? [])]
@@ -47,7 +74,7 @@ export function PublishingPage() {
       <TitleBlock
         eyebrow="Distribution"
         title="Publishing tracker"
-        description="Keep every platform link and publishing status in one place."
+        description="Keep every platform link, channel and publishing status in one place."
         action={
           <button onClick={() => setModal({})} className="btn-primary inline-flex items-center gap-2 self-start rounded-lg px-4 py-2.5 text-xs font-semibold sm:self-auto">
             <Plus className="h-4 w-4" />
@@ -120,10 +147,15 @@ export function PublishingPage() {
         )}
       </section>
 
-      <section className="card overflow-hidden">
-        <CardHeading
+      {publications.error ? (
+        <ErrorCard message={publications.error.message} onRetry={() => publications.refetch()} />
+      ) : (
+        <PublicationsTable
           title="Recent publications"
-          subtitle="Review live links and update publishing records."
+          subtitle="Review live links, channel and publishing history."
+          rows={publications.data}
+          loading={publications.isPending}
+          onEdit={setEditing}
           action={
             <div className="flex items-center gap-2">
               <button onClick={exportCsv} className="btn-secondary rounded-lg px-3 py-2 text-[10px] font-semibold">Export</button>
@@ -134,54 +166,82 @@ export function PublishingPage() {
             </div>
           }
         />
-        <div className="table-wrap">
-          <table className="w-full min-w-[780px] text-left text-xs">
-            <thead className="bg-slate-50/80 text-[10px] uppercase tracking-wider text-slate-500">
-              <tr>
-                <th className="px-5 py-3 font-semibold">Video</th>
-                <th className="px-4 py-3 font-semibold">Creator</th>
-                <th className="px-4 py-3 font-semibold">Platforms</th>
-                <th className="px-4 py-3 font-semibold">Live since</th>
-                <th className="px-5 py-3 font-semibold">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {published.data?.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="px-5 py-12 text-center text-sm text-slate-500">No videos published yet.</td>
-                </tr>
-              )}
-              {published.data?.map(v => (
-                <tr key={v.code}>
-                  <td className="px-5 py-3">
-                    <button onClick={() => setModal({ code: v.code })} className="flex items-center gap-3 text-left" title="Update publishing record">
-                      <Thumb gradient={v.thumbColor} src={v.thumbnailUrl} />
-                      <div>
-                        <div className="font-semibold text-slate-800 hover:text-indigo-600">{v.title}</div>
-                        <div className="mt-1 text-[10px] text-slate-500">{v.code}</div>
-                      </div>
-                    </button>
-                  </td>
-                  <td className="px-4 py-3 text-slate-600">{v.creator}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex flex-wrap gap-1.5">
-                      {v.platforms.map(l => (
-                        <a key={l.platform} href={l.url} target="_blank" rel="noreferrer" title={l.url}>
-                          <PlatformBadge platform={l.platform} />
-                        </a>
-                      ))}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-slate-500">{v.firstPublishedAt ? formatDate(v.firstPublishedAt) : '—'}</td>
-                  <td className="px-5 py-3"><Badge text="Published" /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      )}
 
       {modal && <PublishModal videos={publishable} initialCode={modal.code} onClose={() => setModal(null)} />}
+      {editing && <EditPublicationModal publication={editing} onClose={() => setEditing(null)} />}
     </>
+  )
+}
+
+interface TableProps {
+  title: string
+  subtitle: string
+  rows?: Publication[]
+  loading: boolean
+  action?: ReactNode
+  /** Admin only; the column is hidden without it. */
+  onEdit?: (p: Publication) => void
+}
+
+function PublicationsTable({ title, subtitle, rows, loading, action, onEdit }: TableProps) {
+  const cols = onEdit ? 7 : 6
+  return (
+    <section className="card overflow-hidden">
+      <CardHeading title={title} subtitle={subtitle} action={action} />
+      <div className="table-wrap">
+        <table className="w-full min-w-[900px] text-left text-xs">
+          <thead className="bg-slate-50/80 text-[10px] uppercase tracking-wider text-slate-500">
+            <tr>
+              <th className="px-5 py-3 font-semibold">Video</th>
+              <th className="px-4 py-3 font-semibold">Creator</th>
+              <th className="px-4 py-3 font-semibold">Platform</th>
+              <th className="px-4 py-3 font-semibold">Channel</th>
+              <th className="px-4 py-3 font-semibold">URL / live since</th>
+              <th className="px-5 py-3 font-semibold">Status</th>
+              {onEdit && <th className="px-5 py-3 text-right">Actions</th>}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {loading && (
+              <tr>
+                <td colSpan={cols} className="px-5 py-12 text-center text-sm text-slate-500">Loading…</td>
+              </tr>
+            )}
+            {rows?.length === 0 && (
+              <tr>
+                <td colSpan={cols} className="px-5 py-12 text-center text-sm text-slate-500">No published links are available yet.</td>
+              </tr>
+            )}
+            {rows?.map(p => (
+              <tr key={p.id}>
+                <td className="px-5 py-3">
+                  <div className="flex items-center gap-3">
+                    <Thumb gradient={p.thumbColor} src={p.thumbnailUrl} />
+                    <div>
+                      <div className="font-semibold text-slate-800">{p.title}</div>
+                      <div className="mt-1 text-[10px] text-slate-500">{p.code}</div>
+                    </div>
+                  </div>
+                </td>
+                <td className="px-4 py-3 text-slate-600">{p.creator}</td>
+                <td className="px-4 py-3"><PlatformBadge platform={p.platform} /></td>
+                <td className="px-4 py-3 text-slate-600">{p.channel || '—'}</td>
+                <td className="px-4 py-3 text-slate-500">
+                  <a href={p.url} target="_blank" rel="noopener noreferrer" className="block max-w-[260px] truncate text-indigo-600 hover:underline">{p.url}</a>
+                  <span className="text-[10px]">{formatDate(p.publishedAt)}</span>
+                </td>
+                <td className="px-5 py-3"><Badge text={PUBLICATION_STATUS_LABEL[p.status] ?? p.status} /></td>
+                {onEdit && (
+                  <td className="px-5 py-3 text-right">
+                    <button onClick={() => onEdit(p)} className="text-[10px] font-semibold text-indigo-600">Edit</button>
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
   )
 }

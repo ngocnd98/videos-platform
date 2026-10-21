@@ -55,7 +55,23 @@ public class DashboardRepository {
     }
 
     public int platformCount() {
-        return count("SELECT count(*) FROM platforms");
+        return count("SELECT count(*) FROM platforms WHERE enabled = 1");
+    }
+
+    public int approvedUnpublished() {
+        return count("SELECT count(*) FROM videos WHERE status = 'APPROVED'");
+    }
+
+    public int pendingPayouts() {
+        return count("SELECT count(*) FROM payouts WHERE status = 'PENDING' AND cancelled_at IS NULL");
+    }
+
+    public long pendingPayoutsCents() {
+        return sum("SELECT coalesce(sum(amount_cents), 0) FROM payouts WHERE status = 'PENDING' AND cancelled_at IS NULL");
+    }
+
+    public long storageUsedBytes() {
+        return sum("SELECT coalesce(sum(size_bytes), 0) FROM video_files WHERE status = 'AVAILABLE'");
     }
 
     public long grossForMonth(String month) {
@@ -63,7 +79,7 @@ public class DashboardRepository {
     }
 
     public int activeCreators() {
-        return count("SELECT count(*) FROM creator_profiles");
+        return count("SELECT count(*) FROM creator_profiles cp JOIN users u ON u.id = cp.user_id WHERE u.status = 'ACTIVE'");
     }
 
     public int creatorsJoinedThisMonth() {
@@ -104,7 +120,7 @@ public class DashboardRepository {
     public List<PublicationItem> recentPublications(int limit) {
         return jdbc.sql("""
                         SELECT v.code, v.title, u.display_name AS creator, p.name AS platform, vp.url,
-                               v.thumb_color, vp.published_at
+                               vp.channel, vp.status, v.thumb_color, vp.published_at
                         FROM video_publications vp
                         JOIN videos v ON v.id = vp.video_id
                         JOIN platforms p ON p.id = vp.platform_id

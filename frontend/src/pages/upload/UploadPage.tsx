@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState, type DragEvent, type FormEvent } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
-  Check, CircleCheck, Clock3, CloudUpload, Copyright, HardDrive, LoaderCircle, RefreshCw, RotateCw, Send, Smartphone, TextSearch, Trash2, Upload, WifiOff,
+  Check, CircleCheck, Clock3, CloudUpload, Copyright, HardDrive, LoaderCircle, RefreshCw, RotateCw, Save, Send, Smartphone, TextSearch, Trash2, Upload, WifiOff,
   type LucideIcon,
 } from 'lucide-react'
+import { useSettings } from '../../api/admin'
 import { ApiError } from '../../api/client'
+import type { Video } from '../../api/types'
 import { useCategories, videoApi } from '../../api/videos'
 import { CardHeading, TitleBlock } from '../../ui/common'
 import { useToast } from '../../ui/Toast'
@@ -13,8 +15,11 @@ import { UploadAbortedError, uploadOriginal } from '../../upload/multipartUpload
 import { captureThumbnail, formatBytes, readDuration } from '../../upload/videoFile'
 import { UploadsTable } from './UploadsTable'
 
-const MAX_BYTES = 2 * 1024 * 1024 * 1024
-const EMPTY_FORM: FormValues = { title: '', categoryId: '', tags: '', description: '' }
+const EMPTY_FORM: FormValues = { title: '', categoryId: '', tags: '', description: '', language: 'English' }
+const LANGUAGES = ['English', 'Spanish', 'French', 'Portuguese', 'Other']
+const MAX_TAGS = 10
+
+const tagCount = (tags: string) => tags.split(',').filter(t => t.trim()).length
 
 type Status = 'idle' | 'ready' | 'uploading' | 'interrupted' | 'complete'
 type Phase = 'storage' | 'submission'
@@ -23,6 +28,9 @@ export function UploadPage() {
   const toast = useToast()
   const queryClient = useQueryClient()
   const { data: categories = [] } = useCategories()
+  const { data: settings } = useSettings()
+  const limitGb = settings?.uploadLimitGb ?? 2
+  const maxBytes = limitGb * 1024 ** 3
   const formRef = useRef<HTMLFormElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -37,7 +45,10 @@ export function UploadPage() {
   const [file, setFile] = useState<File | null>(null)
   const [fileLabel, setFileLabel] = useState(restored ? { name: restored.fileName, size: restored.fileSize } : null)
   const [code, setCode] = useState<string | null>(restored?.code ?? null)
-  const [values, setValues] = useState<FormValues>(restored?.metadata ?? EMPTY_FORM)
+  const [values, setValues] = useState<FormValues>({ ...EMPTY_FORM, ...restored?.metadata })
+  const [savingDraft, setSavingDraft] = useState(false)
+  // Drafts created by this form (not ones reopened from "Your uploads") are discarded with "Remove file".
+  const [createdHere, setCreatedHere] = useState(!!restored)
   const [autoThumbnail, setAutoThumbnail] = useState(true)
   const [dragging, setDragging] = useState(false)
   // Whether the current draft has an upload session on the server that can be resumed.
@@ -71,7 +82,7 @@ export function UploadPage() {
   const chooseFile = (picked: File | undefined) => {
     if (!picked) return
     if (!picked.type.startsWith('video/')) return toast('Choose a video file to upload.', 'error')
-    if (picked.size > MAX_BYTES) return toast('This video is larger than the 2 GB upload limit.', 'error')
+    if (picked.size > maxBytes) return toast(`This video is larger than the ${limitGb} GB upload limit.`, 'error')
 
     if (status === 'interrupted' && restored && fileKeyOf(picked) === restored.fileKey && code === restored.code) {
       setFile(picked)
@@ -80,7 +91,7 @@ export function UploadPage() {
     }
     if (status === 'uploading') return
     if (status === 'complete') {
-      // Starting a new video after the last one was submitted.
+      // Starting a new video after the last one was saved.
       setCode(null)
       setValues(EMPTY_FORM)
     }
@@ -109,25 +120,27 @@ export function UploadPage() {
     setUploadedBytes(0)
     setSubmissionPct(0)
     setHasSession(false)
+    setCreatedHere(false)
     saveCheckpoint(null)
     if (inputRef.current) inputRef.current.value = ''
   }
 
   const removeFile = async () => {
     // An unfinished draft has no value without its file; drop it so it doesn't clutter "Your uploads".
-    if (code && status !== 'complete') {
+    if (code && createdHere && status !== 'complete') {
       await videoApi.remove(code).catch(() => undefined)
       queryClient.invalidateQueries({ queryKey: ['videos'] })
     }
     reset()
   }
 
-  const metadataFrom = async (f: File) => ({
+  const metadataFrom = async (f?: File) => ({
     title: values.title.trim(),
     categoryId: Number(values.categoryId),
     tags: values.tags || undefined,
     description: values.description || undefined,
-    durationSec: await readDuration(f),
+    language: values.language || 'English',
+    durationSec: f ? await readDuration(f) : undefined,
   })
 
   const run = async (restart: boolean) => {
@@ -137,6 +150,7 @@ export function UploadPage() {
       return
     }
     if (!formRef.current?.reportValidity()) return
+    if (tagCount(values.tags) > MAX_TAGS) return toast('A video can have up to 10 tags.', 'error')
 
     const controller = new AbortController()
     abortRef.current = controller
@@ -150,6 +164,7 @@ export function UploadPage() {
       if (!videoCode) {
         videoCode = (await videoApi.create(metadata)).code
         setCode(videoCode)
+        setCreatedHere(true)
         queryClient.invalidateQueries({ queryKey: ['videos'] })
       }
 
@@ -187,7 +202,7 @@ export function UploadPage() {
         persist({ code: videoCode, phase: 'submission', progress: 100 }, f)
       }
 
-      // Submission: sync the latest form values, attach a thumbnail, then send for review.
+      // Save the draft: sync the latest form values and attach a thumbnail. Submitting is a separate step.
       setSubmissionPct(15)
       await videoApi.update(videoCode, metadata)
       if (controller.signal.aborted) throw new UploadAbortedError()
@@ -197,14 +212,12 @@ export function UploadPage() {
         if (frame) await videoApi.uploadThumbnail(videoCode, frame).catch(() => undefined)
       }
       if (controller.signal.aborted) throw new UploadAbortedError()
-      setSubmissionPct(80)
-      await videoApi.submit(videoCode)
       setSubmissionPct(100)
       setStatus('complete')
       saveCheckpoint(null)
       queryClient.invalidateQueries({ queryKey: ['videos'] })
       queryClient.invalidateQueries({ queryKey: ['dashboard'] })
-      toast('Upload complete. Your video is now in review.')
+      toast('Upload complete. Your video is saved as a draft.')
     } catch (e) {
       setStatus('interrupted')
       if (videoCode) persist({ code: videoCode, phase: currentPhase, progress: progressRef.current }, f)
@@ -216,6 +229,63 @@ export function UploadPage() {
     } finally {
       abortRef.current = null
     }
+  }
+
+  const submitForReview = async () => {
+    if (!code) return
+    try {
+      await videoApi.submit(code)
+      queryClient.invalidateQueries({ queryKey: ['videos'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+      toast('Video submitted for review.')
+      reset()
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not submit the video.', 'error')
+    }
+  }
+
+  /** Metadata-only draft; the file can be added later from "Your uploads". */
+  const saveDraft = async () => {
+    if (status === 'uploading' || status === 'complete') {
+      return toast('Wait for the current upload to finish before saving another draft.', 'error')
+    }
+    if (!values.title.trim() || !values.categoryId) {
+      document.getElementById(!values.title.trim() ? 'videoTitle' : 'videoCategory')?.focus()
+      return toast('Add a title and category before saving the draft.', 'error')
+    }
+    if (tagCount(values.tags) > MAX_TAGS) return toast('A video can have up to 10 tags.', 'error')
+    setSavingDraft(true)
+    try {
+      const metadata = await metadataFrom()
+      if (code) await videoApi.update(code, metadata)
+      else await videoApi.create(metadata)
+      queryClient.invalidateQueries({ queryKey: ['videos'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+      abortRef.current?.abort()
+      reset()
+      toast('Draft saved. You can edit it or submit it for review later.')
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not save the draft.', 'error')
+    } finally {
+      setSavingDraft(false)
+    }
+  }
+
+  /** Loads a draft without a stored file into the form so its file can be uploaded. */
+  const continueDraft = (video: Video) => {
+    if (status === 'uploading') return toast('Wait for the current upload to finish first.', 'error')
+    abortRef.current?.abort()
+    reset()
+    setCode(video.code)
+    setValues({
+      title: video.title,
+      categoryId: video.categoryId ? String(video.categoryId) : '',
+      tags: video.tags ?? '',
+      description: video.description ?? '',
+      language: video.language ?? 'English',
+    })
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+    toast(`Select the video file for “${video.title}”.`)
   }
 
   const onSubmit = (e: FormEvent) => {
@@ -242,7 +312,7 @@ export function UploadPage() {
         action={
           <span className="inline-flex items-center gap-1.5 self-start rounded-full bg-emerald-50 px-3 py-2 text-[10px] font-semibold text-emerald-700 sm:self-auto">
             <HardDrive className="h-3.5 w-3.5" />
-            Up to 2 GB per video
+            Up to {limitGb} GB per video
           </span>
         }
       />
@@ -268,7 +338,7 @@ export function UploadPage() {
             <h2 className="mt-4 text-sm font-semibold text-slate-800">
               Drop your video here, or <span className="text-indigo-600">browse files</span>
             </h2>
-            <p className="mt-1.5 text-xs text-slate-500">MP4, MOV or WebM · Up to 2 GB</p>
+            <p className="mt-1.5 text-xs text-slate-500">MP4, MOV or WebM · Up to {limitGb} GB</p>
             {fileLabel && (
               <div className="mt-3 flex items-center justify-center gap-3 text-xs font-medium text-indigo-700">
                 <span className="max-w-[min(65vw,340px)] truncate">
@@ -305,6 +375,7 @@ export function UploadPage() {
               onRestart={() => run(true)}
               onDisconnect={() => abortRef.current?.abort()}
               onNew={reset}
+              onSubmitForReview={submitForReview}
             />
           )}
 
@@ -319,17 +390,27 @@ export function UploadPage() {
                   <label htmlFor="videoCategory" className="mb-1.5 block text-xs font-semibold text-slate-700">Category</label>
                   <select id="videoCategory" className="input" required value={values.categoryId} onChange={set('categoryId')}>
                     <option value="">Select a category</option>
-                    {categories.map(c => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
+                    {categories
+                      .filter(c => c.visible || String(c.id) === values.categoryId)
+                      .map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
                   </select>
                 </div>
                 <div>
-                  <label htmlFor="videoTags" className="mb-1.5 block text-xs font-semibold text-slate-700">
-                    Tags <span className="font-normal text-slate-400">(optional)</span>
-                  </label>
-                  <input id="videoTags" className="input" maxLength={200} placeholder="Add tags, separated by commas" value={values.tags} onChange={set('tags')} />
+                  <label htmlFor="videoLanguage" className="mb-1.5 block text-xs font-semibold text-slate-700">Video language</label>
+                  <select id="videoLanguage" className="input" value={values.language ?? 'English'} onChange={set('language')}>
+                    {LANGUAGES.map(l => (
+                      <option key={l}>{l}</option>
+                    ))}
+                  </select>
                 </div>
+              </div>
+              <div>
+                <label htmlFor="videoTags" className="mb-1.5 block text-xs font-semibold text-slate-700">
+                  Tags <span className="font-normal text-slate-400">(optional · max 10)</span>
+                </label>
+                <input id="videoTags" className="input" maxLength={200} placeholder="Add up to 10 tags, separated by commas" value={values.tags} onChange={set('tags')} />
               </div>
               <div>
                 <label htmlFor="videoDescription" className="mb-1.5 block text-xs font-semibold text-slate-700">Description</label>
@@ -348,7 +429,18 @@ export function UploadPage() {
                 </label>
               </div>
             </fieldset>
-            <SubmitButton status={status} phase={phase} storagePct={storagePct} submissionPct={submissionPct} />
+            <div className="grid gap-2 sm:grid-cols-2">
+              <button
+                type="button"
+                onClick={saveDraft}
+                disabled={locked || savingDraft}
+                className="btn-secondary inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Save className="h-4 w-4" />
+                Save as draft
+              </button>
+              <SubmitButton status={status} phase={phase} storagePct={storagePct} submissionPct={submissionPct} />
+            </div>
           </form>
         </section>
 
@@ -363,7 +455,7 @@ export function UploadPage() {
         </section>
       </div>
 
-      <UploadsTable />
+      <UploadsTable onContinue={continueDraft} />
     </>
   )
 }
@@ -387,10 +479,10 @@ function SubmitButton({ status, phase, storagePct, submissionPct }: { status: St
     status === 'interrupted'
       ? [WifiOff, 'Upload interrupted']
       : status === 'complete'
-        ? [Check, 'Submitted for review']
+        ? [Check, 'Upload complete · draft saved']
         : status === 'uploading'
-          ? [LoaderCircle, phase === 'storage' ? `Uploading · ${storagePct}%` : `Submitting · ${submissionPct}%`]
-          : [Upload, status === 'ready' ? 'Upload & submit for review' : 'Upload video']
+          ? [LoaderCircle, phase === 'storage' ? `Uploading · ${storagePct}%` : `Saving · ${submissionPct}%`]
+          : [Upload, 'Upload video']
   return (
     <button
       type="submit"
@@ -415,6 +507,7 @@ interface ProgressPanelProps {
   onRestart: () => void
   onDisconnect: () => void
   onNew: () => void
+  onSubmitForReview: () => void
 }
 
 function ProgressPanel(p: ProgressPanelProps) {
@@ -427,9 +520,9 @@ function ProgressPanel(p: ProgressPanelProps) {
   const statusText = uploading
     ? phase === 'storage'
       ? `Uploading to cloud storage · ${storagePct}%`
-      : `Submitting video · ${submissionPct}%`
+      : `Saving draft · ${submissionPct}%`
     : complete
-      ? 'Upload complete — submitted for review'
+      ? 'Upload complete — draft saved'
       : interrupted
         ? phase === 'storage'
           ? `Connection interrupted · ${storagePct}% saved`
@@ -454,7 +547,7 @@ function ProgressPanel(p: ProgressPanelProps) {
         {storageDone && (
           <ProgressBar
             icon={complete ? CircleCheck : Send}
-            label={complete ? 'Submitted for review' : 'Saving submission details'}
+            label={complete ? 'Draft saved · ready to submit' : 'Saving submission details'}
             pct={complete ? 100 : submissionPct}
             barClass={complete ? 'bg-emerald-500' : 'bg-indigo-600'}
             trackClass="bg-slate-200"
@@ -486,9 +579,12 @@ function ProgressPanel(p: ProgressPanelProps) {
         </div>
       )}
       {complete && (
-        <div className="mt-3 flex justify-end">
+        <div className="mt-3 flex justify-end gap-2">
           <button type="button" onClick={p.onNew} className="btn-secondary rounded-lg px-3 py-2 text-[10px] font-semibold">
             Upload another video
+          </button>
+          <button type="button" onClick={p.onSubmitForReview} className="btn-primary rounded-lg px-3 py-2 text-[10px] font-semibold">
+            Submit for review
           </button>
         </div>
       )}

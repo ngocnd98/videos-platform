@@ -17,12 +17,12 @@ export function AuditDrawer({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="drawer-backdrop" onMouseDown={e => e.target === e.currentTarget && onClose()}>
-      <aside className="drawer" aria-label="Review audit log">
+      <aside className="drawer" aria-label="Audit log">
         <div className="sticky top-0 z-10 border-b border-slate-100 bg-white px-5 py-4">
           <div className="flex items-start justify-between">
             <div>
-              <h2 className="text-sm font-semibold text-slate-900">Review audit log</h2>
-              <p className="mt-1 text-xs text-slate-500">A timestamped history of content decisions.</p>
+              <h2 className="text-sm font-semibold text-slate-900">Audit log</h2>
+              <p className="mt-1 text-xs text-slate-500">Timestamped history of content and administrative decisions.</p>
             </div>
             <button onClick={onClose} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" aria-label="Close audit log">
               <X className="h-4 w-4" />

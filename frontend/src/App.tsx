@@ -1,19 +1,20 @@
 import { Navigate, Route, Routes } from 'react-router'
 import { useAuth, type Mode } from './auth/AuthContext'
 import { AppLayout } from './layout/AppLayout'
-import { NAV_ITEMS } from './layout/nav'
-import { Placeholder } from './pages/Placeholder'
+import { PATH_MODES } from './layout/nav'
 import { DashboardPage } from './pages/dashboard/DashboardPage'
 import { UploadPage } from './pages/upload/UploadPage'
 import { ReviewPage } from './pages/review/ReviewPage'
 import { PublishingPage } from './pages/publishing/PublishingPage'
 import { RevenuePage } from './pages/revenue/RevenuePage'
-
-const PAGES: Record<string, { eyebrow: string; title: string; description: string; step: string }> = {
-  '/analytics': { eyebrow: 'Insights', title: 'Analytics', description: 'Revenue, views and creator payouts over time.', step: 'step 7' },
-  '/profile': { eyebrow: 'Creator portal', title: 'My profile', description: 'Your public identity, payout details, and current agreement.', step: 'step 7' },
-  '/roles': { eyebrow: 'Workspace settings', title: 'Staff & permissions', description: 'Manage access with clear, role-based permissions.', step: 'step 7' },
-}
+import { AnalyticsPage } from './pages/analytics/AnalyticsPage'
+import { ProfilePage } from './pages/profile/ProfilePage'
+import { PayoutsPage } from './pages/payouts/PayoutsPage'
+import { RolesPage } from './pages/roles/RolesPage'
+import { CreatorsPage } from './pages/creators/CreatorsPage'
+import { CategoriesPage } from './pages/categories/CategoriesPage'
+import { CmsPage } from './pages/cms/CmsPage'
+import { SettingsPage } from './pages/settings/SettingsPage'
 
 const SCREENS: Record<string, React.ReactNode> = {
   '/dashboard': <DashboardPage />,
@@ -21,6 +22,14 @@ const SCREENS: Record<string, React.ReactNode> = {
   '/review': <ReviewPage />,
   '/publishing': <PublishingPage />,
   '/revenue': <RevenuePage />,
+  '/analytics': <AnalyticsPage />,
+  '/profile': <ProfilePage />,
+  '/payouts': <PayoutsPage />,
+  '/roles': <RolesPage />,
+  '/creators': <CreatorsPage />,
+  '/categories': <CategoriesPage />,
+  '/cms': <CmsPage />,
+  '/settings': <SettingsPage />,
 }
 
 function Guard({ modes, children }: { modes: Mode[]; children: React.ReactNode }) {
@@ -46,16 +55,8 @@ export default function App() {
     <Routes>
       <Route element={<AppLayout />}>
         <Route index element={<Navigate to="/dashboard" replace />} />
-        {NAV_ITEMS.map(item => (
-          <Route
-            key={item.path}
-            path={item.path}
-            element={
-              <Guard modes={item.modes}>
-                {SCREENS[item.path] ?? <Placeholder {...PAGES[item.path]} />}
-              </Guard>
-            }
-          />
+        {Object.entries(PATH_MODES).map(([path, modes]) => (
+          <Route key={path} path={path} element={<Guard modes={modes}>{SCREENS[path]}</Guard>} />
         ))}
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Route>

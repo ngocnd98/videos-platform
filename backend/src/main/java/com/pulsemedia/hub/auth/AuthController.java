@@ -42,6 +42,12 @@ public class AuthController {
         var row = users.findByEmail(req.email())
                 .filter(r -> passwordEncoder.matches(req.password(), r.passwordHash()))
                 .orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "Invalid email or password."));
+        if ("SUSPENDED".equals(row.status())) {
+            throw new ApiException(HttpStatus.FORBIDDEN, "This account is suspended. Contact an administrator.");
+        }
+        if ("INVITED".equals(row.status())) {
+            throw new ApiException(HttpStatus.FORBIDDEN, "This invitation hasn't been accepted yet.");
+        }
         return new LoginResponse(jwt.issue(row.user()), row.user());
     }
 

@@ -96,17 +96,27 @@ class RevenueFlowTest {
                 .andExpect(jsonPath("$.imported").value(2))
                 .andExpect(jsonPath("$.totals.grossCents").value(109950));
 
-        // Paying Alex settles all his unpaid entries (this month's seed rows + the two new ones).
+        // Payouts are per creator and month: create (PENDING) → record the transfer (PAID).
         mvc.perform(get("/api/admin/payouts/balances").header("Authorization", admin))
-                .andExpect(jsonPath("$[?(@.creatorId == 1)].pendingCents").value(199320 + 12000 + 60030));
-        mvc.perform(post("/api/admin/payouts").header("Authorization", admin).contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"creatorId\":1,\"externalRef\":\"BANK-TEST-1\",\"remarks\":\"October\"}"))
+                .andExpect(jsonPath("$[?(@.creatorId == 1)].pendingCents").value(119220 + 12000 + 60030));
+        mvc.perform(get("/api/admin/payouts/preview?creatorId=1&period=" + NEXT_MONTH).header("Authorization", admin))
+                .andExpect(jsonPath("$.entries").value(2))
+                .andExpect(jsonPath("$.amountCents").value(72030));
+        JsonNode payout = body(mvc.perform(post("/api/admin/payouts").header("Authorization", admin).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"creatorId\":1,\"period\":\"" + NEXT_MONTH + "\"}"))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.amountCents").value(271350))
-                .andExpect(jsonPath("$.status").value("PAID"))
-                .andExpect(jsonPath("$.entries").value(5));
+                .andExpect(jsonPath("$.amountCents").value(72030))
+                .andExpect(jsonPath("$.status").value("PENDING"))
+                .andExpect(jsonPath("$.entries").value(2)));
+        long payoutId = payout.get("id").asLong();
         mvc.perform(post("/api/admin/payouts").header("Authorization", admin).contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"creatorId\":1,\"externalRef\":\"AGAIN\"}"))
+                        .content("{\"creatorId\":1,\"period\":\"" + NEXT_MONTH + "\"}"))
+                .andExpect(status().isConflict());
+        mvc.perform(post("/api/admin/payouts/" + payoutId + "/paid").header("Authorization", admin)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"externalRef\":\"BANK-TEST-1\",\"remarks\":\"October\"}"))
+                .andExpect(jsonPath("$.status").value("PAID"))
+                .andExpect(jsonPath("$.externalRef").value("BANK-TEST-1"));
+        mvc.perform(post("/api/admin/payouts/" + payoutId + "/cancel").header("Authorization", admin))
                 .andExpect(status().isConflict());
 
         // Paid entries are locked.
@@ -123,7 +133,7 @@ class RevenueFlowTest {
                 .andExpect(jsonPath("$.paidCents").value(12000 + 60030))
                 .andExpect(jsonPath("$.pendingCents").value(0));
         mvc.perform(get("/api/creator/dashboard").header("Authorization", alex))
-                .andExpect(jsonPath("$.pendingPayoutCents").value(0));
+                .andExpect(jsonPath("$.pendingPayoutCents").value(199320));
         mvc.perform(get("/api/admin/revenue").header("Authorization", alex)).andExpect(status().isForbidden());
     }
 }

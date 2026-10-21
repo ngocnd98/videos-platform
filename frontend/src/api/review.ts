@@ -53,3 +53,13 @@ export function useReject() {
     onSettled: invalidate,
   })
 }
+
+/** Corrects title / category / tags while the video is still in review. */
+export function useUpdateReviewInfo() {
+  const invalidate = useInvalidateAfterDecision()
+  return useMutation({
+    mutationFn: ({ code, ...body }: { code: string; title: string; categoryId: number; tags?: string }) =>
+      api<ReviewDetail>(`/admin/reviews/${encodeURIComponent(code)}`, { method: 'PATCH', json: body }),
+    onSuccess: invalidate,
+  })
+}

@@ -12,7 +12,18 @@ public final class PublishingDtos {
     private PublishingDtos() {
     }
 
-    public record PlatformLink(String platform, String url, String note, String publishedAt) {
+    public record PlatformLink(long id, String platform, String url, String channel, String status, String note,
+                               String publishedAt) {
+    }
+
+    /** One row per platform link, as listed in the publishing tracker. */
+    public record Publication(long id, String code, String title, String creator, String platform, String channel,
+                              String url, String note, String status, String publishedAt, String thumbColor,
+                              String thumbnailUrl) {
+    }
+
+    public record PublicationUpdate(@Size(max = 80) String channel, @NotBlank @Size(max = 500) String url,
+                                    @NotBlank String status, @Size(max = 500) String note) {
     }
 
     public record PublishingVideo(String code, String title, String creator, String status, String thumbColor,
@@ -27,7 +38,7 @@ public final class PublishingDtos {
     }
 
     public record PublishRequest(@NotEmpty @Size(max = 3) List<@Valid PublicationInput> publications,
-                                 @Size(max = 500) String note) {
+                                 @Size(max = 500) String note, @Size(max = 80) String channel) {
     }
 
     public record DownloadUrl(String url, String fileName) {

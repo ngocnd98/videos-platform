@@ -16,7 +16,7 @@ public class RevenueRepository {
     public record PublishedOn(long videoId, String code, String title, long creatorId, double splitPct, long platformId) {
     }
 
-    public record CreatorInfo(long id, String name, String creatorCode, String country, String payoutMethod) {
+    public record CreatorInfo(long id, String name, String creatorCode, String country, String payoutMethod, String status) {
     }
 
     private static final String SELECT_ENTRY = """
@@ -117,55 +117,79 @@ public class RevenueRepository {
                 .query(CreatorBalance.class).list();
     }
 
+    private static final String SELECT_PAYOUT = """
+            SELECT po.id, printf('PAY-%04d', po.id) AS payout_code, po.creator_id, u.display_name AS creator,
+                   po.period_month AS period, po.amount_cents,
+                   CASE WHEN po.cancelled_at IS NOT NULL THEN 'CANCELLED' ELSE po.status END AS status,
+                   cp.payout_method, po.external_ref, po.remarks, po.created_at, po.paid_at,
+                   (SELECT count(*) FROM revenue_entries r WHERE r.payout_id = po.id) AS entries
+            FROM payouts po
+            JOIN creator_profiles cp ON cp.id = po.creator_id
+            JOIN users u ON u.id = cp.user_id
+            """;
+    private static final String PAYOUT_ORDER = " ORDER BY coalesce(po.paid_at, po.created_at) DESC, po.id DESC";
+
     public List<Payout> payouts(int limit) {
-        return jdbc.sql("""
-                        SELECT po.id, po.creator_id, u.display_name AS creator, po.amount_cents, po.status, po.external_ref,
-                               po.remarks, po.paid_at, (SELECT count(*) FROM revenue_entries r WHERE r.payout_id = po.id) AS entries
-                        FROM payouts po
-                        JOIN creator_profiles cp ON cp.id = po.creator_id
-                        JOIN users u ON u.id = cp.user_id
-                        ORDER BY coalesce(po.paid_at, po.created_at) DESC, po.id DESC
-                        LIMIT ?
-                        """)
-                .param(limit).query(Payout.class).list();
+        return jdbc.sql(SELECT_PAYOUT + PAYOUT_ORDER + " LIMIT ?").param(limit).query(Payout.class).list();
+    }
+
+    public List<Payout> creatorPayouts(long creatorId) {
+        return jdbc.sql(SELECT_PAYOUT + " WHERE po.creator_id = ?" + PAYOUT_ORDER).param(creatorId).query(Payout.class).list();
     }
 
     public Optional<Payout> payout(long id) {
-        return payouts(10_000).stream().filter(p -> p.id() == id).findFirst();
+        return jdbc.sql(SELECT_PAYOUT + " WHERE po.id = ?").param(id).query(Payout.class).optional();
     }
 
-    /** Settles every unpaid entry of the creator in one PAID payout. Returns the payout id, or empty if nothing is owed. */
-    public Optional<Long> settle(long creatorId, String externalRef, String remarks) {
-        long amount = jdbc.sql("""
-                        SELECT coalesce(sum(r.creator_share_cents), 0) FROM revenue_entries r JOIN videos v ON v.id = r.video_id
-                        WHERE v.creator_id = ? AND r.payout_id IS NULL
+    /** Unpaid entries of a creator for one month that aren't in any payout yet: [count, creator share]. */
+    public long[] eligible(long creatorId, String period) {
+        return jdbc.sql("""
+                        SELECT count(*), coalesce(sum(r.creator_share_cents), 0)
+                        FROM revenue_entries r JOIN videos v ON v.id = r.video_id
+                        WHERE v.creator_id = ? AND r.period_month = ? AND r.payout_id IS NULL
                         """)
-                .param(creatorId).query(Long.class).single();
-        int count = jdbc.sql("""
-                        SELECT count(*) FROM revenue_entries r JOIN videos v ON v.id = r.video_id
-                        WHERE v.creator_id = ? AND r.payout_id IS NULL
-                        """)
-                .param(creatorId).query(Integer.class).single();
-        if (count == 0) {
-            return Optional.empty();
-        }
-        jdbc.sql("""
-                        INSERT INTO payouts (creator_id, amount_cents, status, external_ref, remarks, paid_at)
-                        VALUES (?, ?, 'PAID', ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
-                        """)
-                .params(creatorId, amount, externalRef, remarks).update();
+                .params(creatorId, period).query((rs, i) -> new long[] {rs.getLong(1), rs.getLong(2)}).single();
+    }
+
+    /** Creates a PENDING payout holding the eligible entries; the transfer itself happens outside the system. */
+    public long createPending(long creatorId, String period, long amountCents) {
+        jdbc.sql("INSERT INTO payouts (creator_id, amount_cents, status, period_month) VALUES (?, ?, 'PENDING', ?)")
+                .params(creatorId, amountCents, period).update();
         long payoutId = jdbc.sql("SELECT last_insert_rowid()").query(Long.class).single();
         jdbc.sql("""
                         UPDATE revenue_entries SET payout_id = ?
-                        WHERE payout_id IS NULL AND video_id IN (SELECT id FROM videos WHERE creator_id = ?)
+                        WHERE payout_id IS NULL AND period_month = ? AND video_id IN (SELECT id FROM videos WHERE creator_id = ?)
                         """)
-                .params(payoutId, creatorId).update();
-        return Optional.of(payoutId);
+                .params(payoutId, period, creatorId).update();
+        return payoutId;
+    }
+
+    /** Returns false if the payout was no longer pending. */
+    public boolean markPaid(long payoutId, String externalRef, String remarks) {
+        return jdbc.sql("""
+                        UPDATE payouts SET status = 'PAID', external_ref = ?, remarks = ?, paid_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+                        WHERE id = ? AND status = 'PENDING' AND cancelled_at IS NULL
+                        """)
+                .params(externalRef, remarks, payoutId).update() == 1;
+    }
+
+    /** Cancels a pending payout and releases its entries for a future payout. */
+    public boolean cancel(long payoutId) {
+        boolean cancelled = jdbc.sql("""
+                        UPDATE payouts SET cancelled_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+                        WHERE id = ? AND status = 'PENDING' AND cancelled_at IS NULL
+                        """)
+                .param(payoutId).update() == 1;
+        if (cancelled) {
+            jdbc.sql("UPDATE revenue_entries SET payout_id = NULL WHERE payout_id = ?").param(payoutId).update();
+        }
+        return cancelled;
     }
 
     public Optional<CreatorInfo> creator(long creatorId) {
         return jdbc.sql("""
-                        SELECT cp.id, u.display_name AS name, printf('PM-CR-%04d', cp.id) AS creator_code, cp.country, cp.payout_method
+                        SELECT cp.id, u.display_name AS name, printf('PM-CR-%04d', cp.id) AS creator_code, cp.country,
+                               cp.payout_method, u.status
                         FROM creator_profiles cp JOIN users u ON u.id = cp.user_id WHERE cp.id = ?
                         """)
                 .param(creatorId).query(CreatorInfo.class).optional();

@@ -1,11 +1,12 @@
 import { useState, type FormEvent } from 'react'
 import { Camera, CircleCheck, CircleHelp, CircleX, Music2, Play, type LucideIcon } from 'lucide-react'
-import { usePublish, validPlatformUrl } from '../../api/publishing'
+import { useSettings } from '../../api/admin'
+import { CHANNELS, usePublish, validPlatformUrl } from '../../api/publishing'
 import type { Platform, PublishingVideo } from '../../api/types'
 import { Modal } from '../../ui/Modal'
 import { useToast } from '../../ui/Toast'
 
-const PLATFORMS: { name: Platform; icon: LucideIcon; placeholder: string }[] = [
+export const PLATFORMS: { name: Platform; icon: LucideIcon; placeholder: string }[] = [
   { name: 'YouTube', icon: Play, placeholder: 'https://youtube.com/watch?v=…' },
   { name: 'TikTok', icon: Music2, placeholder: 'https://www.tiktok.com/@creator/video/…' },
   { name: 'Instagram', icon: Camera, placeholder: 'https://www.instagram.com/reel/…' },
@@ -20,6 +21,8 @@ interface Props {
 export function PublishModal({ videos, initialCode, onClose }: Props) {
   const toast = useToast()
   const publish = usePublish()
+  const { data: settings } = useSettings()
+  const enabled = (p: Platform) => settings?.platforms.find(s => s.name === p)?.enabled ?? true
   const [code, setCode] = useState(initialCode ?? videos[0]?.code ?? '')
   const video = videos.find(v => v.code === code)
   const existing = (p: Platform) => video?.platforms.find(l => l.platform === p)?.url ?? ''
@@ -27,6 +30,7 @@ export function PublishModal({ videos, initialCode, onClose }: Props) {
   const [selected, setSelected] = useState<Platform[]>([])
   const [urls, setUrls] = useState<Record<string, string>>({})
   const [note, setNote] = useState('')
+  const [channel, setChannel] = useState(CHANNELS[0])
 
   const pickVideo = (next: string) => {
     setCode(next)
@@ -50,7 +54,7 @@ export function PublishModal({ videos, initialCode, onClose }: Props) {
       return toast(`Enter a valid ${invalid} URL.`, 'error')
     }
     publish.mutate(
-      { code, publications: selected.map(p => ({ platform: p, url: urls[p].trim() })), note: note.trim() || undefined },
+      { code, channel, publications: selected.map(p => ({ platform: p, url: urls[p].trim() })), note: note.trim() || undefined },
       {
         onSuccess: () => {
           toast(`Publishing record saved for ${selected.length} platform${selected.length > 1 ? 's' : ''}.`)
@@ -78,10 +82,18 @@ export function PublishModal({ videos, initialCode, onClose }: Props) {
               ))}
             </select>
           </div>
+          <div>
+            <label htmlFor="publishChannel" className="mb-1.5 block text-xs font-semibold text-slate-700">Agency channel</label>
+            <select id="publishChannel" className="input" value={channel} onChange={e => setChannel(e.target.value)}>
+              {CHANNELS.map(c => (
+                <option key={c}>{c}</option>
+              ))}
+            </select>
+          </div>
           <fieldset>
             <legend className="mb-2 text-xs font-semibold text-slate-700">Platforms</legend>
             <div className="grid gap-2 sm:grid-cols-3">
-              {PLATFORMS.map(({ name, icon: Icon }) => (
+              {PLATFORMS.filter(p => enabled(p.name) || existing(p.name)).map(({ name, icon: Icon }) => (
                 <label key={name} className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 px-3 py-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
                   <input type="checkbox" className="check h-4 w-4 rounded" checked={selected.includes(name)} onChange={() => toggle(name)} />
                   <span className="flex items-center gap-1.5">
@@ -118,7 +130,7 @@ export function PublishModal({ videos, initialCode, onClose }: Props) {
   )
 }
 
-function UrlField({ platform, placeholder, value, onChange }: { platform: Platform; placeholder: string; value: string; onChange: (v: string) => void }) {
+export function UrlField({ platform, placeholder, value, onChange }: { platform: Platform; placeholder: string; value: string; onChange: (v: string) => void }) {
   const ok = validPlatformUrl(platform, value)
   const state = !value ? 'empty' : ok ? 'ok' : 'bad'
   return (

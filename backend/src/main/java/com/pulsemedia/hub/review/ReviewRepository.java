@@ -14,14 +14,14 @@ public class ReviewRepository {
     public record ReviewRow(long id, String code, String title, String description, String tags, String status,
                             String creator, Long categoryId, String category, Integer durationSec, String thumbColor,
                             String submittedAt, String originalKey, String fileName, Long sizeBytes,
-                            String thumbnailKey) {
+                            String thumbnailKey, String creatorCountry) {
     }
 
     private static final String SELECT = """
             SELECT v.id, v.code, v.title, v.description, v.tags, v.status, u.display_name AS creator,
                    v.category_id, c.name AS category, v.duration_sec, v.thumb_color, v.submitted_at,
                    o.storage_key AS original_key, o.file_name, o.size_bytes,
-                   t.storage_key AS thumbnail_key
+                   t.storage_key AS thumbnail_key, cp.country AS creator_country
             FROM videos v
             JOIN creator_profiles cp ON cp.id = v.creator_id
             JOIN users u ON u.id = cp.user_id
@@ -55,6 +55,15 @@ public class ReviewRepository {
                         WHERE id = ? AND status = 'IN_REVIEW'
                         """)
                 .params(newStatus, videoId).update() == 1;
+    }
+
+    /** Reviewer corrections apply only while the video is still waiting for a decision. */
+    public boolean correctInfo(long videoId, String title, long categoryId, String tags) {
+        return jdbc.sql("""
+                        UPDATE videos SET title = ?, category_id = ?, tags = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+                        WHERE id = ? AND status = 'IN_REVIEW'
+                        """)
+                .params(title, categoryId, tags, videoId).update() == 1;
     }
 
     public void log(long videoId, String action, String reason, String note, long actorId) {

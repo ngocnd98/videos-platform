@@ -47,12 +47,20 @@ export function formatDuration(sec?: number) {
   return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`
 }
 
-const COUNTRIES: Record<string, string> = {
-  US: 'United States 🇺🇸',
-  SG: 'Singapore 🇸🇬',
-  VN: 'Vietnam 🇻🇳',
-}
+/** ISO code → display name, for selects. */
+export const COUNTRY_OPTIONS: { code: string; name: string }[] = [
+  { code: 'US', name: 'United States' },
+  { code: 'CA', name: 'Canada' },
+  { code: 'GB', name: 'United Kingdom' },
+  { code: 'AU', name: 'Australia' },
+  { code: 'SG', name: 'Singapore' },
+  { code: 'VN', name: 'Vietnam' },
+]
+const FLAGS: Record<string, string> = { US: '🇺🇸', CA: '🇨🇦', GB: '🇬🇧', AU: '🇦🇺', SG: '🇸🇬', VN: '🇻🇳' }
+const COUNTRIES: Record<string, string> = Object.fromEntries(COUNTRY_OPTIONS.map(c => [c.code, `${c.name} ${FLAGS[c.code]}`]))
 export const countryName = (code?: string) => (code ? COUNTRIES[code] ?? code : '—')
+/** Country name without the flag, e.g. for filters. */
+export const countryLabel = (code?: string) => (code ? COUNTRY_OPTIONS.find(c => c.code === code)?.name ?? code : 'Unknown')
 
 export function greeting(date = new Date()) {
   const h = date.getHours()

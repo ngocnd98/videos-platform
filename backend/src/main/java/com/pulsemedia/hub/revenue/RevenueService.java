@@ -19,8 +19,10 @@ import com.pulsemedia.hub.common.AuditLog;
 import com.pulsemedia.hub.revenue.RevenueDtos.CreatorBalance;
 import com.pulsemedia.hub.revenue.RevenueDtos.ImportResult;
 import com.pulsemedia.hub.revenue.RevenueDtos.NewEntry;
+import com.pulsemedia.hub.revenue.RevenueDtos.MarkPaid;
 import com.pulsemedia.hub.revenue.RevenueDtos.NewPayout;
 import com.pulsemedia.hub.revenue.RevenueDtos.Payout;
+import com.pulsemedia.hub.revenue.RevenueDtos.PayoutPreview;
 import com.pulsemedia.hub.revenue.RevenueDtos.RevenueEntry;
 import com.pulsemedia.hub.revenue.RevenueDtos.RevenuePage;
 import com.pulsemedia.hub.revenue.RevenueDtos.Statement;
@@ -29,6 +31,7 @@ import com.pulsemedia.hub.revenue.RevenueDtos.Totals;
 import com.pulsemedia.hub.revenue.RevenueRepository.CreatorInfo;
 import com.pulsemedia.hub.revenue.RevenueRepository.PublishedOn;
 import com.pulsemedia.hub.security.CurrentUser;
+import com.pulsemedia.hub.settings.SettingsService;
 
 /**
  * Revenue is entered per video, platform and month. The creator's split is copied onto each entry
@@ -42,10 +45,12 @@ public class RevenueService {
 
     private final RevenueRepository repo;
     private final AuditLog audit;
+    private final SettingsService settings;
 
-    public RevenueService(RevenueRepository repo, AuditLog audit) {
+    public RevenueService(RevenueRepository repo, AuditLog audit, SettingsService settings) {
         this.repo = repo;
         this.audit = audit;
+        this.settings = settings;
     }
 
     public RevenuePage page(String period) {
@@ -55,6 +60,7 @@ public class RevenueService {
 
     @Transactional
     public RevenueEntry add(CurrentUser admin, NewEntry req) {
+        settings.requireEnabled(req.platform());
         PublishedOn target = publishedOn(req.videoCode(), req.platform());
         requireNoDuplicate(target, req.platform(), req.period());
         long gross = toCents(req.gross());
@@ -114,6 +120,8 @@ public class RevenueService {
         List<Parsed> parsed = new ArrayList<>();
         List<String> errors = new ArrayList<>();
         Set<String> seen = new HashSet<>();
+        Set<String> enabled = new HashSet<>();
+        settings.platforms().stream().filter(p -> p.enabled()).forEach(p -> enabled.add(p.name()));
         for (int i = 1; i < rows.size(); i++) {
             List<String> row = rows.get(i);
             String line = "Row " + (i + 1) + ": ";
@@ -133,6 +141,8 @@ public class RevenueService {
                 errors.add(line + "no published video matches “" + (titleCol >= 0 ? cell(row, titleCol).trim() : "") + "”.");
             } else if (platform == null) {
                 errors.add(line + "platform must be YouTube, TikTok or Instagram.");
+            } else if (!enabled.contains(platform)) {
+                errors.add(line + platform + " is disabled in settings.");
             } else if (period == null || !period.matches(RevenueDtos.PERIOD_PATTERN)) {
                 errors.add(line + "period must look like 2026-10.");
             } else if (gross == null || gross.signum() < 0 || gross.scale() > 2) {
@@ -168,19 +178,73 @@ public class RevenueService {
     }
 
     public List<Payout> payouts() {
-        return repo.payouts(20);
+        return repo.payouts(100);
+    }
+
+    public List<Payout> creatorPayouts(long creatorId) {
+        return repo.creatorPayouts(creatorId);
+    }
+
+    public PayoutPreview preview(long creatorId, String period) {
+        CreatorInfo creator = repo.creator(creatorId).orElseThrow(() -> ApiException.notFound("Creator not found."));
+        long[] eligible = repo.eligible(creatorId, period);
+        return new PayoutPreview(creatorId, period, (int) eligible[0], eligible[1], creator.payoutMethod());
+    }
+
+    /** Step 1: group a creator's unpaid entries for one month into a PENDING payout. */
+    @Transactional
+    public Payout createPayout(CurrentUser admin, NewPayout req) {
+        CreatorInfo creator = repo.creator(req.creatorId()).orElseThrow(() -> ApiException.notFound("Creator not found."));
+        if (!"ACTIVE".equals(creator.status())) {
+            throw ApiException.conflict("Select an active creator.");
+        }
+        if (creator.payoutMethod() == null || creator.payoutMethod().isBlank()) {
+            throw ApiException.conflict("Add payout details to the creator profile before creating a payout.");
+        }
+        long[] eligible = repo.eligible(creator.id(), req.period());
+        if (eligible[0] == 0 || eligible[1] <= 0) {
+            throw ApiException.conflict("There are no unpaid revenue lines for this creator and period.");
+        }
+        Payout payout = repo.payout(repo.createPending(creator.id(), req.period(), eligible[1])).orElseThrow();
+        audit.record("PAYOUT", payout.payoutCode(), creator.name(), "Payout created",
+                creator.name() + " · " + dollars(payout.amountCents()) + " · " + req.period(), admin.id());
+        return payout;
+    }
+
+    /** Step 2: record the external transfer. Paid entries are locked from then on. */
+    @Transactional
+    public Payout markPaid(CurrentUser admin, long id, MarkPaid req) {
+        Payout payout = pendingPayout(id);
+        String remarks = req.remarks() == null || req.remarks().isBlank() ? null : req.remarks().trim();
+        if (!repo.markPaid(id, req.externalRef().trim(), remarks)) {
+            throw ApiException.conflict("Only pending payouts can be changed.");
+        }
+        audit.record("PAYOUT", payout.payoutCode(), payout.creator(), "Payout marked paid",
+                payout.creator() + " · " + dollars(payout.amountCents()) + " · Ref " + req.externalRef().trim(), admin.id());
+        return repo.payout(id).orElseThrow();
     }
 
     @Transactional
-    public Payout pay(CurrentUser admin, NewPayout req) {
-        CreatorInfo creator = repo.creator(req.creatorId()).orElseThrow(() -> ApiException.notFound("Creator not found."));
-        String remarks = req.remarks() == null || req.remarks().isBlank() ? null : req.remarks().trim();
-        long id = repo.settle(creator.id(), req.externalRef().trim(), remarks)
-                .orElseThrow(() -> ApiException.conflict(creator.name() + " has no unpaid revenue."));
-        Payout payout = repo.payout(id).orElseThrow();
-        audit.record("PAYOUT", creator.creatorCode(), creator.name(), "Paid",
-                "$" + BigDecimal.valueOf(payout.amountCents(), 2) + " · ref " + payout.externalRef(), admin.id());
+    public Payout cancel(CurrentUser admin, long id) {
+        Payout payout = pendingPayout(id);
+        if (!repo.cancel(id)) {
+            throw ApiException.conflict("Only pending payouts can be changed.");
+        }
+        audit.record("PAYOUT", payout.payoutCode(), payout.creator(), "Payout cancelled",
+                payout.creator() + " · " + dollars(payout.amountCents()), admin.id());
+        return repo.payout(id).orElseThrow();
+    }
+
+    private Payout pendingPayout(long id) {
+        Payout payout = repo.payout(id).orElseThrow(() -> ApiException.notFound("Payout not found."));
+        if (!"PENDING".equals(payout.status())) {
+            throw ApiException.conflict("Only pending payouts can be changed.");
+        }
         return payout;
+    }
+
+    private static String dollars(long cents) {
+        return "$" + BigDecimal.valueOf(cents, 2);
     }
 
     public Statement statement(long creatorId, String period) {

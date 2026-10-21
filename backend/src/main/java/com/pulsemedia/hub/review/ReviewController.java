@@ -5,6 +5,7 @@ import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -14,6 +15,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.pulsemedia.hub.review.ReviewDtos.AuditEntry;
+import com.pulsemedia.hub.review.ReviewDtos.InfoCorrection;
 import com.pulsemedia.hub.review.ReviewDtos.QueueItem;
 import com.pulsemedia.hub.review.ReviewDtos.RejectRequest;
 import com.pulsemedia.hub.review.ReviewDtos.ReviewDetail;
@@ -46,6 +48,12 @@ public class ReviewController {
     @GetMapping("/reviews/{code}")
     ReviewDetail detail(@PathVariable String code) {
         return service.detail(code);
+    }
+
+    @PatchMapping("/reviews/{code}")
+    ReviewDetail correct(@AuthenticationPrincipal CurrentUser admin, @PathVariable String code,
+                         @Valid @RequestBody InfoCorrection body) {
+        return service.correctInfo(admin, code, body);
     }
 
     @PostMapping("/videos/{code}/approve")

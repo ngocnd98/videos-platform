@@ -20,7 +20,12 @@ public final class DashboardDtos {
             int creatorsJoinedThisMonth,
             List<ReviewItem> reviewQueue,
             List<MonthlyGross> revenueByMonth,
-            List<PublicationItem> recentPublications) {
+            List<PublicationItem> recentPublications,
+            int approvedUnpublished,
+            int pendingPayouts,
+            long pendingPayoutCents,
+            long storageUsedBytes,
+            int storageQuotaGb) {
     }
 
     public record ReviewItem(String code, String title, String creator, String category, String thumbColor,
@@ -31,7 +36,7 @@ public final class DashboardDtos {
     }
 
     public record PublicationItem(String code, String title, String creator, String platform, String url,
-                                  String thumbColor, String publishedAt) {
+                                  String channel, String status, String thumbColor, String publishedAt) {
     }
 
     public record CreatorDashboard(

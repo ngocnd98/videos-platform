@@ -12,11 +12,11 @@ import com.pulsemedia.hub.security.CurrentUser;
 @Repository
 public class UserRepository {
 
-    public record UserRow(CurrentUser user, String passwordHash) {
+    public record UserRow(CurrentUser user, String passwordHash, String status) {
     }
 
     private static final String SELECT = """
-            SELECT u.id, u.email, u.password_hash, u.role, u.staff_role, u.display_name, cp.id AS creator_id
+            SELECT u.id, u.email, u.password_hash, u.status, u.role, u.staff_role, u.display_name, cp.id AS creator_id
             FROM users u
             LEFT JOIN creator_profiles cp ON cp.user_id = u.id
             """;
@@ -38,7 +38,8 @@ public class UserRepository {
                                 rs.getString("staff_role"),
                                 rs.getString("display_name"),
                                 nullableLong(rs, "creator_id")),
-                        rs.getString("password_hash")))
+                        rs.getString("password_hash"),
+                        rs.getString("status")))
                 .optional();
     }
 

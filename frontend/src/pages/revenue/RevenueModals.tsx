@@ -1,24 +1,25 @@
 import { useMemo, useRef, useState, type DragEvent, type FormEvent } from 'react'
 import { FileSpreadsheet } from 'lucide-react'
 import { usePublishingVideos } from '../../api/publishing'
-import { currentPeriod, parseDollars, useAddRevenue, useImportRevenue, usePay } from '../../api/revenue'
-import type { CreatorBalance, Platform } from '../../api/types'
+import { useSettings } from '../../api/admin'
+import { currentPeriod, parseDollars, useAddRevenue, useImportRevenue } from '../../api/revenue'
+import type { Platform } from '../../api/types'
 import { Modal } from '../../ui/Modal'
 import { useToast } from '../../ui/Toast'
-import { money } from '../../ui/common'
-import { cents } from '../../ui/format'
 
 export function ManualEntryModal({ onClose }: { onClose: () => void }) {
   const toast = useToast()
   const add = useAddRevenue()
   const { data: videos = [] } = usePublishingVideos('PUBLISHED')
+  const { data: settings } = useSettings()
+  const enabled = (p: Platform) => settings?.platforms.find(s => s.name === p)?.enabled ?? true
   const [code, setCode] = useState('')
   const [platform, setPlatform] = useState<Platform | ''>('')
   const [period, setPeriod] = useState(currentPeriod())
   const [gross, setGross] = useState('')
 
   const video = videos.find(v => v.code === code)
-  const platforms = video?.platforms.map(p => p.platform) ?? []
+  const platforms = (video?.platforms.map(p => p.platform) ?? []).filter(enabled)
 
   const submit = (e: FormEvent) => {
     e.preventDefault()
@@ -50,7 +51,7 @@ export function ManualEntryModal({ onClose }: { onClose: () => void }) {
             onChange={e => {
               setCode(e.target.value)
               const v = videos.find(x => x.code === e.target.value)
-              setPlatform(v?.platforms[0]?.platform ?? '')
+              setPlatform(v?.platforms.map(p => p.platform).find(enabled) ?? '')
             }}
           >
             <option value="">Select a published video</option>
@@ -170,59 +171,6 @@ export function ImportModal({ onClose }: { onClose: () => void }) {
           <button onClick={submit} disabled={importer.isPending} className="btn-primary rounded-lg px-4 py-2 text-xs font-semibold disabled:opacity-60">Import data</button>
         </div>
       </div>
-    </Modal>
-  )
-}
-
-export function PayModal({ balance, onClose }: { balance: CreatorBalance; onClose: () => void }) {
-  const toast = useToast()
-  const pay = usePay()
-  const [ref, setRef] = useState('')
-  const [remarks, setRemarks] = useState('')
-
-  const submit = (e: FormEvent) => {
-    e.preventDefault()
-    pay.mutate(
-      { creatorId: balance.creatorId, externalRef: ref.trim(), remarks: remarks.trim() || undefined },
-      {
-        onSuccess: p => {
-          toast(`Payout of ${money(cents(p.amountCents))} to ${balance.creator} recorded.`)
-          onClose()
-        },
-        onError: err => toast(err.message, 'error'),
-      },
-    )
-  }
-
-  return (
-    <Modal title="Record payout" subtitle="Mark the transfer you made outside PulseMedia Hub as paid." onClose={onClose}>
-      <form onSubmit={submit} className="space-y-4 p-5">
-        <div className="flex items-center justify-between rounded-lg bg-indigo-50 p-3.5">
-          <div>
-            <div className="text-xs font-semibold text-indigo-900">{balance.creator}</div>
-            <div className="mt-1 text-[10px] text-indigo-800/75">
-              {balance.creatorCode} · {balance.payoutMethod ?? 'No payout account'} · {balance.entries} entr{balance.entries === 1 ? 'y' : 'ies'}
-            </div>
-          </div>
-          <strong className="text-lg font-semibold text-indigo-700">{money(cents(balance.pendingCents))}</strong>
-        </div>
-        <div>
-          <label htmlFor="payRef" className="mb-1.5 block text-xs font-semibold text-slate-700">
-            Transfer reference <span className="text-rose-500">*</span>
-          </label>
-          <input id="payRef" required maxLength={100} className="input" placeholder="e.g. BANK-TRX-100231" value={ref} onChange={e => setRef(e.target.value)} />
-        </div>
-        <div>
-          <label htmlFor="payRemarks" className="mb-1.5 block text-xs font-semibold text-slate-700">
-            Remarks <span className="font-normal text-slate-400">(optional)</span>
-          </label>
-          <textarea id="payRemarks" rows={2} maxLength={300} className="input resize-y" value={remarks} onChange={e => setRemarks(e.target.value)} />
-        </div>
-        <div className="flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="btn-secondary rounded-lg px-4 py-2 text-xs font-semibold">Cancel</button>
-          <button type="submit" disabled={pay.isPending} className="btn-primary rounded-lg px-4 py-2 text-xs font-semibold disabled:opacity-60">Mark as paid</button>
-        </div>
-      </form>
     </Modal>
   )
 }

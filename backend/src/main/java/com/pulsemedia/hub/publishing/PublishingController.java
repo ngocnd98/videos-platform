@@ -7,6 +7,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -16,6 +17,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.pulsemedia.hub.publishing.PublishingDtos.DownloadUrl;
 import com.pulsemedia.hub.publishing.PublishingDtos.PlatformSummary;
+import com.pulsemedia.hub.publishing.PublishingDtos.Publication;
+import com.pulsemedia.hub.publishing.PublishingDtos.PublicationUpdate;
 import com.pulsemedia.hub.publishing.PublishingDtos.PublishRequest;
 import com.pulsemedia.hub.publishing.PublishingDtos.PublishingVideo;
 import com.pulsemedia.hub.security.CurrentUser;
@@ -50,6 +53,17 @@ public class PublishingController {
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"publishing-report.csv\"")
                 .contentType(new MediaType("text", "csv", java.nio.charset.StandardCharsets.UTF_8))
                 .body(service.exportCsv());
+    }
+
+    @GetMapping("/publications")
+    List<Publication> publications() {
+        return service.publications();
+    }
+
+    @PatchMapping("/publications/{id}")
+    Publication updatePublication(@AuthenticationPrincipal CurrentUser admin, @PathVariable long id,
+                                  @Valid @RequestBody PublicationUpdate body) {
+        return service.updatePublication(admin, id, body);
     }
 
     @GetMapping("/videos/{code}/download-url")
