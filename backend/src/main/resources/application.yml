@@ -1,0 +1,40 @@
+server:
+  port: ${PORT:8080}
+  shutdown: graceful
+
+spring:
+  application:
+    name: pulsemedia-hub
+  datasource:
+    # Demo: the database lives on the container's ephemeral disk and is re-created on every boot.
+    url: jdbc:sqlite:${DB_PATH:./data/app.db}?foreign_keys=on&journal_mode=WAL&busy_timeout=5000
+    driver-class-name: org.sqlite.JDBC
+    hikari:
+      # SQLite allows a single writer; one connection avoids SQLITE_BUSY.
+      maximum-pool-size: 1
+  flyway:
+    locations: classpath:db/migration
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+  jackson:
+    default-property-inclusion: non_null
+
+app:
+  jwt:
+    secret: ${JWT_SECRET:dev-only-secret-change-me-dev-only-secret-change-me}
+    ttl: 12h
+  r2:
+    endpoint: ${R2_ENDPOINT:}
+    access-key: ${R2_ACCESS_KEY_ID:}
+    secret-key: ${R2_SECRET_ACCESS_KEY:}
+    bucket: ${R2_BUCKET:}
+    presign-ttl: 15m
+    # Objects uploaded during this boot go under <upload-prefix>/<bootId>/ so a reset DB never collides with old files.
+    upload-prefix: demo
+    seed-prefix: seed
+
+logging:
+  level:
+    com.pulsemedia: INFO
